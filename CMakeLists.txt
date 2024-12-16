@@ -87,7 +87,7 @@ elseif(USE_BANG)
     # setup cncc flags
     set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS} -fPIC -Wall -Werror -std=c++11 -pthread")
     set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS} -O3")
-    set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS}" "--bang-mlu-arch=mtp_372")
+    set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS}" "--bang-mlu-arch=mtp_592")
 
     list(APPEND ALL_SOURCE_FILES ${BANG_SOURCE_FILES} ${CPP_SOURCE_FILES})
     bang_add_library(my_library SHARED ${ALL_SOURCE_FILES})# 创建库或可执行文件
