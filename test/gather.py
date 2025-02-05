@@ -19,12 +19,15 @@ def gather(rank, axis, inputTensor, indexTensor):
     return outTensor
 def test(inputShape, indexShape, axis, test_dtype, device):
     print(
-        f"Testing Softmax on {device} with x_shape:{inputShape} , indice_shape:{indexShape}, axis:{axis} ,dtype:{test_dtype}"
+        f"Testing Gather on {device} with x_shape:{inputShape} , indice_shape:{indexShape}, axis:{axis} ,dtype:{test_dtype}"
     )
     inputTensor = torch.rand(inputShape, device=device, dtype=test_dtype)
 
     index = np.random.randint(0, inputShape[axis], indexShape).astype(np.int32)
-    indexTensor = torch.from_numpy(index).to(torch.int64).to(device)
+    if(device != "cuda"):
+        indexTensor = torch.from_numpy(index).to(torch.int32).to(device)
+    else:
+        indexTensor = torch.from_numpy(index).to(torch.int64).to(device)
 
     rank = len(inputShape)
     outTensor = gather(rank, axis, inputTensor, indexTensor)#
