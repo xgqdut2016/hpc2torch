@@ -3,10 +3,19 @@
 #include <vector>
 
 template <typename T, typename Tind>
-void gatherCnnlDevice(void const *input, const Tind *indices, void *output,
+void gatherCnnlDevice(void const *input, void const *indices, void *output,
                       int *x_shape, int *w_shape, int *y_shape,
                       int x_ndim, int w_ndim, int y_ndim, int axis, cnnlHandle_t &handle, cnrtQueue_t &queue)
 {
+    int *shape_data;
+    int shape_size = 1;
+    for (int i = 0; i < x_ndim; i++)
+    {
+        shape_size *= x_shape[i];
+    }
+    CNRT_CHECK(cnrtMalloc((void **)&shape_data, shape_size * sizeof(int)));
+    CNRT_CHECK(cnrtMemcpy(shape_data, x_shape, shape_size * sizeof(int), cnrtMemcpyHostToDev));
+
     cnnlTensorDescriptor_t input_desc, indices_desc, output_desc;
     cnnlCreateTensorDescriptor(&input_desc);
     cnnlCreateTensorDescriptor(&indices_desc);
@@ -34,8 +43,8 @@ void gatherCnnlDevice(void const *input, const Tind *indices, void *output,
     if (sizeof(Tind) == 4)
     {
         cnnlGatherV2(handle, axis, input_desc, input,
-                     x_shape, indices_desc,
-                     indices, output_desc, output);
+                     shape_data, indices_desc,
+                     reinterpret_cast<const int *>(indices), output_desc, output);
 
         CNRT_CHECK(cnrtQueueSync(queue));
     }
@@ -60,13 +69,13 @@ void gatherCnnlDevice(void const *input, const Tind *indices, void *output,
         cnnlDestroyTensorDescriptor(bDescInt64);
 
         cnnlGatherV2(handle, axis, input_desc, input,
-                     x_shape, indices_desc,
-                     indices32, output_desc, output);
+                     shape_data, indices_desc,
+                     reinterpret_cast<const int *>(indices32), output_desc, output);
 
         CNRT_CHECK(cnrtQueueSync(queue));
         cnrtFree(indices32);
     }
-
+    cnrtFree(shape_data);
     cnnlDestroyTensorDescriptor(input_desc);
     cnnlDestroyTensorDescriptor(output_desc);
     cnnlDestroyTensorDescriptor(indices_desc);
@@ -82,8 +91,8 @@ void gatherCnnl(void const *input, void const *indices, void *output,
     cnrtQueue_t queue;
     CNRT_CHECK(cnrtQueueCreate(&queue));
     cnnlSetQueue(handle, queue); // 将队列绑定到 handle 中, 此接口也可用来更改句柄中的队列。
-    auto index = reinterpret_cast<const Tind *>(indices);
-    gatherCnnlDevice<T, Tind>(input, index, output,
+
+    gatherCnnlDevice<T, Tind>(input, indices, output,
                               x_shape, w_shape, y_shape,
                               x_ndim, w_ndim, y_ndim, axis, handle, queue);
 
