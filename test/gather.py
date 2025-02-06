@@ -24,7 +24,7 @@ def test(inputShape, indexShape, axis, test_dtype, device):
     inputTensor = torch.rand(inputShape, device=device, dtype=test_dtype)
 
     index = np.random.randint(0, inputShape[axis], indexShape).astype(np.int32)
-    if(device != "cuda"):
+    if(device != "cuda"):#有些国产平台比如说MLU不支持int64计算
         indexTensor = torch.from_numpy(index).to(torch.int32).to(device)
     else:
         indexTensor = torch.from_numpy(index).to(torch.int64).to(device)
@@ -134,20 +134,35 @@ test_cases = [
         ((3, 2), (2, 2), 0, torch.float32, "cuda"),
         ((3, 2), (1, 2), 1, torch.float32, "cuda"),
         ((50257, 768), (16, 1024), 0, torch.float32, "cuda"),
+        ((9, 9, 10, 9), (16, 10), 0, torch.float32, "cuda"),
+        ((9, 9, 10, 9), (16, 10), 1, torch.float32, "cuda"),
+        ((9, 9, 10, 9), (16, 10), 2, torch.float32, "cuda"),
+        ((9, 9, 10, 9), (16, 10), 3, torch.float32, "cuda"),
 
         ((3, 2), (2, 2), 0, torch.float16, "cuda"),
         ((3, 2), (1, 2), 1, torch.float16, "cuda"),
         ((50257, 768), (16, 1024), 0, torch.float16, "cuda"),
+        ((9, 9, 10, 9, 10), (16, 2, 5), 0, torch.float16, "cuda"),
+        ((9, 9, 10, 9, 10), (16, 2, 5), 1, torch.float16, "cuda"),
+        ((9, 9, 10, 9, 10), (16, 2, 5), 2, torch.float16, "cuda"),
+        ((9, 9, 10, 9, 10), (16, 2, 5), 3, torch.float16, "cuda"),
 
         ((3, 2), (2, 2), 0, torch.float32, "mlu"),
         ((3, 2), (1, 2), 1, torch.float32, "mlu"),
         ((50257, 768), (16, 1024), 0, torch.float32, "mlu"),
+        ((9, 9, 10, 9), (16, 10), 0, torch.float32, "mlu"),
+        ((9, 9, 10, 9), (16, 10), 1, torch.float32, "mlu"),
+        ((9, 9, 10, 9), (16, 10), 2, torch.float32, "mlu"),
+        ((9, 9, 10, 9), (16, 10), 3, torch.float32, "mlu"),
         
 
         ((3, 2), (2, 2), 0, torch.float16, "mlu"),
         ((3, 2), (1, 2), 1, torch.float16, "mlu"),
         ((50257, 768), (16, 1024), 0, torch.float16, "mlu"),
-        
+        ((9, 9, 10, 9, 10), (16, 2, 5), 0, torch.float16, "mlu"),
+        ((9, 9, 10, 9, 10), (16, 2, 5), 1, torch.float16, "mlu"),
+        ((9, 9, 10, 9, 10), (16, 2, 5), 2, torch.float16, "mlu"),
+        ((9, 9, 10, 9, 10), (16, 2, 5), 3, torch.float16, "mlu"),
          
 ]
 filtered_test_cases = [
