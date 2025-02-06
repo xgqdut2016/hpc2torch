@@ -31,14 +31,17 @@ def test(inputShape, indexShape, axis, test_dtype, device):
 
     rank = len(inputShape)
     outTensor = gather(rank, axis, inputTensor, indexTensor)#
-    indSize = 1
+    indsize = 1
     for i in range(len(indexShape)):
-        indSize *= indexShape[i]
-    stride = inputTensor.stride()[axis]
-    othersize = 1
+        indsize *= indexShape[i]
+    frontsize = 1
+    dimsize = inputShape[axis]
+    behindsize = 1
     for i in range(len(inputShape)):
-        if(i != axis):
-            othersize *= inputShape[i]
+        if(i < axis):
+            frontsize *= inputShape[i]
+        elif (i > axis):
+            behindsize *= inputShape[i]
     outputShape = []
     for i in range(len(outTensor.shape)):
         outputShape.append(outTensor.shape[i])
@@ -68,9 +71,10 @@ def test(inputShape, indexShape, axis, test_dtype, device):
                 ctypes.POINTER(ctypes.c_void_p),
                 ctypes.c_int,
                 ctypes.c_int,
+                ctypes.c_int,
                 ctypes.c_int
             ]
-            custom_gather_time = performance.CudaProfile((lib.gather_nv_f32, (input_ptr, index_ptr, output_ptr, stride, indSize, othersize)))
+            custom_gather_time = performance.CudaProfile((lib.gather_nv_f32, (input_ptr, index_ptr, output_ptr, frontsize, dimsize, behindsize, indsize)))
         if device == "mlu":
             torch_gather_time = performance.BangProfile((gather, (rank, axis, inputTensor, indexTensor)))
             lib.gather_cnnl_f32.argtypes = [
@@ -96,9 +100,10 @@ def test(inputShape, indexShape, axis, test_dtype, device):
                 ctypes.POINTER(ctypes.c_void_p),
                 ctypes.c_int,
                 ctypes.c_int,
+                ctypes.c_int,
                 ctypes.c_int
             ]
-            custom_gather_time = performance.CudaProfile((lib.gather_nv_f16, (input_ptr, index_ptr, output_ptr, stride, indSize, othersize))) 
+            custom_gather_time = performance.CudaProfile((lib.gather_nv_f16, (input_ptr, index_ptr, output_ptr, frontsize, dimsize, behindsize, indsize))) 
         if device == "mlu":
             torch_gather_time = performance.BangProfile((gather, (rank, axis, inputTensor, indexTensor)))
             lib.gather_cnnl_f16.argtypes = [
