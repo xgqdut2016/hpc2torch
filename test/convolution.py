@@ -15,22 +15,21 @@ lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/
 lib = ctypes.CDLL(lib_path)
 
 def conv(x, w, stride, padding, dilation):
-    match len(x.shape) - 2:
-        case 1:
-            return F.conv1d(
+    if(len(x.shape) == 3): 
+        return F.conv1d(
+            x, w, stride=stride, padding=padding, dilation=dilation
+        )
+    elif (len(x.shape) == 4): 
+        return F.conv2d(
                 x, w, stride=stride, padding=padding, dilation=dilation
             )
-        case 2:
-            return F.conv2d(
+    elif (len(x.shape) == 5): 
+        return F.conv3d(
                 x, w, stride=stride, padding=padding, dilation=dilation
             )
-        case 3:
-            return F.conv3d(
-                x, w, stride=stride, padding=padding, dilation=dilation
-            )
-        case _:
-            print("Error: Pytorch -> Unsupported tensor dimension")
-            return None
+    else:
+        print("Error: Pytorch -> Unsupported tensor dimension")
+        return None
 def inferShape(
     x_shape: List[int],
     w_shape: List[int],
@@ -101,6 +100,22 @@ def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
             ]           
             custom_convolution_time = \
             performance.BangProfile((lib.convolution_cnnl_f32, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
+        if device == "npu":
+            torch_convolution_time = performance.AscendProfile((conv, (x, w, strides, pads, dilations))) 
+            lib.convolution_aclnn_f32.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),#pads
+                ctypes.POINTER(ctypes.c_int),#strides
+                ctypes.POINTER(ctypes.c_int),#dilations
+                ctypes.POINTER(ctypes.c_int),#x_shape
+                ctypes.POINTER(ctypes.c_int),#w_shape
+                ctypes.POINTER(ctypes.c_int),#y_shape
+                ctypes.c_int
+            ]           
+            custom_convolution_time = \
+            performance.AscendProfile((lib.convolution_aclnn_f32, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
     if test_dtype == torch.float16:
         if device == "mlu":
             torch_convolution_time = performance.BangProfile((conv, (x, w, strides, pads, dilations))) 
@@ -118,6 +133,22 @@ def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
             ]           
             custom_convolution_time = \
             performance.BangProfile((lib.convolution_cnnl_f16, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
+        if device == "npu":
+            torch_convolution_time = performance.AscendProfile((conv, (x, w, strides, pads, dilations))) 
+            lib.convolution_aclnn_f32.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),#pads
+                ctypes.POINTER(ctypes.c_int),#strides
+                ctypes.POINTER(ctypes.c_int),#dilations
+                ctypes.POINTER(ctypes.c_int),#x_shape
+                ctypes.POINTER(ctypes.c_int),#w_shape
+                ctypes.POINTER(ctypes.c_int),#y_shape
+                ctypes.c_int
+            ]           
+            custom_convolution_time = \
+            performance.AscendProfile((lib.convolution_aclnn_f32, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
     performance.logBenchmark(torch_convolution_time, custom_convolution_time)
 
     # 将结果转换回 PyTorch 张量以进行比较
@@ -136,7 +167,7 @@ def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="Test convolution on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, help="Device to run the tests on.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 
 test_cases = [   
@@ -181,7 +212,50 @@ test_cases = [
             (64, 3, 5, 5, 5),
             (3, 2, 2),
             (4, 3, 3),
-            (2, 2, 1), torch.float16, 'mlu'),    
+            (2, 2, 1), torch.float16, 'mlu'),   
+        #--------------
+        ((32, 3, 4),
+            (32, 3, 5),
+            (1,),
+            (1,),
+            (1,),
+            torch.float32, 'npu'),    
+        # ((32, 3, 128, 128),
+        #     (64, 3, 5, 5),
+        #     (2, 2),
+        #     (2, 2),
+        #     (1, 1), torch.float32, 'npu'), 
+        # ((1, 1, 4, 4, 4),
+        #     (1, 1, 5, 5, 5),
+        #     (1, 1, 1),
+        #     (1, 1, 1),
+        #     (1, 1, 1), torch.float32, 'npu'), 
+        # ((32, 3, 32, 32, 32),
+        #     (64, 3, 5, 5, 5),
+        #     (3, 2, 2),
+        #     (4, 3, 3),
+        #     (2, 2, 1), torch.float32, 'npu'),  
+        # ((32, 3, 4),
+        #     (32, 3, 5),
+        #     (1,),
+        #     (1,),
+        #     (1,),
+        #     torch.float16, 'npu'),     
+        # ((32, 3, 128, 128),
+        #     (64, 3, 5, 5),
+        #     (2, 2),
+        #     (2, 2),
+        #     (1, 1), torch.float16, 'npu'), 
+        # ((1, 1, 4, 4, 4),
+        #     (1, 1, 5, 5, 5),
+        #     (1, 1, 1),
+        #     (1, 1, 1),
+        #     (1, 1, 1), torch.float16, 'npu'), 
+        # ((32, 3, 32, 32, 32),
+        #     (64, 3, 5, 5, 5),
+        #     (3, 2, 2),
+        #     (4, 3, 3),
+        #     (2, 2, 1), torch.float16, 'npu'),    
 ]
 
 filtered_test_cases = [
@@ -191,6 +265,8 @@ filtered_test_cases = [
 ]
 if args.device == 'mlu':
     import torch_mlu
+elif args.device == 'npu':
+    import torch_npu
 # 执行过滤后的测试用例
 for x_shape, w_shape, pads, strides, dilations, test_dtype, device in filtered_test_cases:
     test(x_shape, w_shape, pads, strides, dilations, test_dtype, device)
