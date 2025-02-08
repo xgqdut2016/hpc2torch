@@ -1,4 +1,4 @@
 mkdir build
 cd build
-cmake ../ -DUSE_BANG=ON
+cmake ../ -DUSE_ASCEND=ON
 make
