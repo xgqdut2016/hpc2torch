@@ -31,8 +31,9 @@ def test(test_shape, minValue, maxValue, device):
 
     input_ptr = ctypes.cast(aData.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     output_ptr = ctypes.cast(cData.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    aShape = np.array(test_shape, dtype=np.int32).ctypes.data_as(ctypes.POINTER(ctypes.c_int))
     if device == "cpu":
-        torch_clip_time = performance.BangProfile((torch.clip, (aData, minValue, maxValue)))  # 可以替换为mul, div
+        torch_clip_time = performance.CpuProfile((torch.clip, (aData, minValue, maxValue)))  # 可以替换为mul, div
         lib.clip_cpu.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -43,9 +44,9 @@ def test(test_shape, minValue, maxValue, device):
 
         ]
         custom_clip_time = \
-        performance.BangProfile((lib.clip_cpu, (input_ptr, output_ptr, minValue, maxValue, n, byteSize)))
+        performance.CpuProfile((lib.clip_cpu, (input_ptr, output_ptr, minValue, maxValue, n, byteSize)))
     elif device == "cuda":
-        torch_clip_time = performance.BangProfile((torch.clip, (aData, minValue, maxValue)))  # 可以替换为mul, div
+        torch_clip_time = performance.CudaProfile((torch.clip, (aData, minValue, maxValue)))  # 可以替换为mul, div
         lib.clip_cuda.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -56,7 +57,21 @@ def test(test_shape, minValue, maxValue, device):
 
         ]
         custom_clip_time = \
-        performance.BangProfile((lib.clip_cuda, (input_ptr, output_ptr, minValue, maxValue, n, byteSize)))
+        performance.CudaProfile((lib.clip_cuda, (input_ptr, output_ptr, minValue, maxValue, n, byteSize)))
+    elif device == "mlu":
+        torch_clip_time = performance.BangProfile((torch.clip, (aData, minValue, maxValue)))  # 可以替换为mul, div
+        lib.clip_cnnl.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_float,
+            ctypes.c_float,
+            ctypes.c_int
+
+        ]
+        custom_clip_time = \
+        performance.BangProfile((lib.clip_cnnl, (input_ptr, output_ptr, aShape, len(test_shape), minValue, maxValue, byteSize)))
     performance.logBenchmark(torch_clip_time, custom_clip_time)
     tmpa = torch.clip(aData, minValue, maxValue).to('cpu').numpy().flatten()
     tmpb = cData.to('cpu').numpy().flatten()
@@ -73,22 +88,15 @@ parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, h
 args = parser.parse_args()    
 test_cases = [
         # 
-        ((6, ), -1, 1, "cpu"),
-        ((33, 109), -0.5, 0.5, "cpu"),
-        ((507, 78, 57), -0.5, 0.5, "cpu"),
-
-        ((6, ), -1, 1, "cuda"),
-        ((33, 109), -0.5, 0.5, "cuda"),
-        ((50257, 768, 5), -0.5, 0.5, "cuda"),
+        ((6, ), 0.5, 1),
+        ((33, 109), 0.1, 0.5),
+        # ((502, 768, 5), -0.5, 0.5),
+        ((50257, 768, 5), 0.5, 1),
          
 ]
-filtered_test_cases = [
-    (test_shape, minValue, maxValue, device)
-    for test_shape, minValue, maxValue, device in test_cases
-    if device == args.device
-]
+
 if args.device == 'mlu':
     import torch_mlu
 # 执行过滤后的测试用例
-for test_shape, minValue, maxValue, device in filtered_test_cases:
-    test(test_shape, minValue, maxValue, device)
+for test_shape, minValue, maxValue in test_cases:
+    test(test_shape, minValue, maxValue, args.device)
