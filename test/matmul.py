@@ -35,7 +35,7 @@ def test_mlu(a_shape, b_shape, c_shape, alpha, beta):
         test_dtype = torch.float16
     
     print(
-        f"Testing matmul on {device} with a_shape:{a_shape} b_shape:{b_shape} c_shape:{c_shape} , dtype:{test_dtype}"
+        f"Testing matmul on {device} with alpha:{alpha}, beta:{beta}, a_shape:{a_shape} b_shape:{b_shape} c_shape:{c_shape} , dtype:{test_dtype}"
     )
     A = torch.randn(a_shape, device=device, dtype=test_dtype, requires_grad=False) 
     B = torch.randn(b_shape, device=device, dtype=test_dtype, requires_grad=False)
@@ -73,8 +73,10 @@ def test_mlu(a_shape, b_shape, c_shape, alpha, beta):
     custom_matmul_time = \
     performance.BangProfile((lib.matmul_cnnl, 
     (A_ptr, B_ptr, C_ptr, aShape, bShape, cShape, aDim, bDim, cDim, alpha, beta, byteSize)))
-
-    tmpa = matmul(C_clone, beta, A, B, alpha).to('cpu').detach().numpy().flatten()
+    performance.logBenchmark(torch_matmul_time, custom_matmul_time)
+    for i in range(40):
+        C_clone = matmul(C_clone, beta, A, B, alpha)
+    tmpa = C_clone.to('cpu').detach().numpy().flatten()
     
     tmpb = C.to('cpu').detach().numpy().flatten()
     
@@ -160,9 +162,9 @@ elif args.device == "mlu":
     import torch_mlu
     test_cases = [
         # alpha, beta, a_shape, b_shape, c_shape, a_stride, b_stride, c_stride, dtype
-        (1.0, 0.0, (6, 2048), (2048, 2048), (6, 2048)),
+        (1.0, 1.0, (6, 2048), (2048, 2048), (6, 2048)),
         (1.0, 0.0, (2, 4, 2048), (2, 2048, 2048), (2, 4, 2048)),
-        (1.0, 0.0, (1, 2048), (2048, 2048), (1, 2048)),
+        (1.0, 0.5, (1, 2048), (2048, 2048), (1, 2048)),
         (1.0, 1.0, (6, 2048), (2048, 2560), (6, 2560)),
         (1.0 / 8.0, 0.0, (4, 8 * 6, 64), (4, 64, 6), (4, 8 * 6, 6)),
     ]

@@ -36,31 +36,32 @@ void matmulCnnlDevice(void const *aData, void const *bData, void *cData,
     cnnlSetTensorDescriptor(
         cDesc, layout, dataType,
         cDim, c_shape);
-    cnnlMatMulDescriptor_t bmm_desc;
-    cnnlMatMulDescCreate(&bmm_desc);
-    cnnlSetMatMulDescAttr(bmm_desc, CNNL_MATMUL_DESC_TRANSA, &transA,
-                          sizeof(int32_t));
-    cnnlSetMatMulDescAttr(bmm_desc, CNNL_MATMUL_DESC_TRANSB, &transB,
-                          sizeof(int32_t));
 
-    cnnlMatMulAlgo_t bmm_algo;
-    cnnlMatMulAlgoCreate(&bmm_algo);
+    cnnlMatMulDescriptor_t opDesc;
+    cnnlMatMulAlgo_t algo;
+    cnnlMatMulHeuristicResult_t algoResult;
+    cnnlMatMulDescCreate(&opDesc);
+    cnnlMatMulAlgoCreate(&algo);
+    cnnlCreateMatMulHeuristicResult(&algoResult);
+    int32_t use_stride = true;
+    cnnlSetMatMulDescAttr(opDesc, CNNL_MATMUL_USE_STRIDE, &use_stride,
+                          sizeof(int32_t));
 
     int count = 0;
 
-    cnnlMatMulHeuristicResult_t desc;
-    cnnlCreateMatMulHeuristicResult(&desc);
-
-    cnnlGetBatchMatMulAlgoHeuristic(handle, bmm_desc, aDesc,
-                                    bDesc, cDesc, NULL, 1, &desc, &count);
+    cnnlGetBatchMatMulAlgoHeuristic(handle, opDesc, aDesc,
+                                    bDesc, cDesc,
+                                    NULL, 1, &algoResult, &count);
     size_t wsSize;
-    cnnlGetBatchMatMulHeuristicResult(desc, bmm_algo, &wsSize);
+    cnnlGetBatchMatMulHeuristicResult(algoResult, algo, &wsSize);
     void *wsData;
-    CNRT_CHECK(cnrtMalloc((void **)&wsData, wsSize));
+    cnrtMalloc(&wsData, wsSize);
+    cnnlStatus_t stat = cnnlBatchMatMulBCast_v2(handle, opDesc, algo,
+                                                &alpha, aDesc, aData,
+                                                bDesc, bData,
+                                                &beta, cDesc, cData,
+                                                wsData, wsSize);
 
-    cnnlStatus_t stat = cnnlBatchMatMulBCast_v2(
-        handle, bmm_desc, bmm_algo, &alpha, aDesc, aData,
-        bDesc, bData, &beta, cDesc, cData, wsData, wsSize);
     CNRT_CHECK(cnrtQueueSync(queue));
     if (stat != CNNL_STATUS_SUCCESS)
         return;
@@ -69,9 +70,9 @@ void matmulCnnlDevice(void const *aData, void const *bData, void *cData,
     cnnlDestroyTensorDescriptor(bDesc);
     cnnlDestroyTensorDescriptor(cDesc);
 
-    cnnlMatMulDescDestroy(bmm_desc);
-    cnnlMatMulAlgoDestroy(bmm_algo);
-    cnnlDestroyMatMulHeuristicResult(desc);
+    cnnlMatMulDescDestroy(opDesc);
+    cnnlMatMulAlgoDestroy(algo);
+    cnnlDestroyMatMulHeuristicResult(algoResult);
 }
 template <typename T>
 void matmulCnnl(void const *aData, void const *bData, void *cData,
