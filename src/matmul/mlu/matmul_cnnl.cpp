@@ -2,6 +2,7 @@
 #include "cnnl_extra.h"
 #include <vector>
 
+<<<<<<< HEAD
 void setMatrixTensorEx(cnnlTensorDescriptor_t desc, cnnlTensorLayout_t layout, cnnlDataType_t dataType, int *shape, int ndim){
     int batch;
     int rows;
@@ -42,6 +43,8 @@ void setMatrixTensorEx(cnnlTensorDescriptor_t desc, cnnlTensorLayout_t layout, c
     }
 
 }
+=======
+>>>>>>> faeb826 (error cnnl matmul)
 template <typename T>
 void matmulCnnlDevice(void const *aData, void const *bData, void *cData,
                       int *a_shape, int *b_shape, int *c_shape,
@@ -63,6 +66,7 @@ void matmulCnnlDevice(void const *aData, void const *bData, void *cData,
     int32_t transB = 0;
     cnnlTensorDescriptor_t aDesc, bDesc, cDesc;
     cnnlCreateTensorDescriptor(&aDesc);
+<<<<<<< HEAD
     cnnlCreateTensorDescriptor(&bDesc);
     cnnlCreateTensorDescriptor(&cDesc);
 
@@ -96,6 +100,46 @@ void matmulCnnlDevice(void const *aData, void const *bData, void *cData,
                                                 &beta, cDesc, cData,
                                                 wsData, wsSize);
 
+=======
+    cnnlSetTensorDescriptor(
+        aDesc, layout, dataType,
+        aDim, a_shape);
+
+    cnnlCreateTensorDescriptor(&bDesc);
+    cnnlSetTensorDescriptor(
+        bDesc, layout, dataType,
+        bDim, b_shape);
+
+    cnnlCreateTensorDescriptor(&cDesc);
+    cnnlSetTensorDescriptor(
+        cDesc, layout, dataType,
+        cDim, c_shape);
+    cnnlMatMulDescriptor_t bmm_desc;
+    cnnlMatMulDescCreate(&bmm_desc);
+    cnnlSetMatMulDescAttr(bmm_desc, CNNL_MATMUL_DESC_TRANSA, &transA,
+                          sizeof(int32_t));
+    cnnlSetMatMulDescAttr(bmm_desc, CNNL_MATMUL_DESC_TRANSB, &transB,
+                          sizeof(int32_t));
+
+    cnnlMatMulAlgo_t bmm_algo;
+    cnnlMatMulAlgoCreate(&bmm_algo);
+
+    int count = 0;
+
+    cnnlMatMulHeuristicResult_t desc;
+    cnnlCreateMatMulHeuristicResult(&desc);
+
+    cnnlGetBatchMatMulAlgoHeuristic(handle, bmm_desc, aDesc,
+                                    bDesc, cDesc, NULL, 1, &desc, &count);
+    size_t wsSize;
+    cnnlGetBatchMatMulHeuristicResult(desc, bmm_algo, &wsSize);
+    void *wsData;
+    CNRT_CHECK(cnrtMalloc((void **)&wsData, wsSize));
+
+    cnnlStatus_t stat = cnnlBatchMatMulBCast_v2(
+        handle, bmm_desc, bmm_algo, &alpha, aDesc, aData,
+        bDesc, bData, &beta, cDesc, cData, wsData, wsSize);
+>>>>>>> faeb826 (error cnnl matmul)
     CNRT_CHECK(cnrtQueueSync(queue));
     if (stat != CNNL_STATUS_SUCCESS)
         return;
@@ -104,9 +148,15 @@ void matmulCnnlDevice(void const *aData, void const *bData, void *cData,
     cnnlDestroyTensorDescriptor(bDesc);
     cnnlDestroyTensorDescriptor(cDesc);
 
+<<<<<<< HEAD
     cnnlMatMulDescDestroy(opDesc);
     cnnlMatMulAlgoDestroy(algo);
     cnnlDestroyMatMulHeuristicResult(algoResult);
+=======
+    cnnlMatMulDescDestroy(bmm_desc);
+    cnnlMatMulAlgoDestroy(bmm_algo);
+    cnnlDestroyMatMulHeuristicResult(desc);
+>>>>>>> faeb826 (error cnnl matmul)
 }
 template <typename T>
 void matmulCnnl(void const *aData, void const *bData, void *cData,
