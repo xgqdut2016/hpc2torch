@@ -2,19 +2,91 @@ import torch
 import ctypes
 import torch.nn.functional as F
 import argparse
-
+import numpy as np
 import performance
 # 添加上一层目录到模块搜索路径
 import sys
 import os
 
-# 定义函数参数类型
-def funAttention(Q, K, V): 
-    return torch.softmax(Q@K.t(), dim = 1)@V
+
 
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/lib/libmy_library.so')
 lib = ctypes.CDLL(lib_path)
-def test(M, K, N, test_dtype, device):
+
+def matmul(_c, beta, _a, _b, alpha):
+    a = _a.clone()
+    b = _b.clone()
+    c = _c.clone()
+    input_dtype = c.dtype
+    ans = (
+        alpha * torch.matmul(a.to(torch.float32), b.to(torch.float32)).to(input_dtype)
+        + beta * c
+    )
+    return ans
+    
+def test_mlu(a_shape, b_shape, c_shape, alpha, beta):
+    device = "mlu"
+    byteSize = 2
+    
+    if (byteSize == 4):
+        test_dtype = torch.float32
+    
+    elif (byteSize == 2):
+        test_dtype = torch.float16
+    
+    print(
+        f"Testing matmul on {device} with a_shape:{a_shape} b_shape:{b_shape} c_shape:{c_shape} , dtype:{test_dtype}"
+    )
+    A = torch.randn(a_shape, device=device, dtype=test_dtype, requires_grad=False) 
+    B = torch.randn(b_shape, device=device, dtype=test_dtype, requires_grad=False)
+    C = torch.randn(c_shape, device=device, dtype=test_dtype, requires_grad=False)
+    C_clone = C.clone()
+    
+
+    A_ptr = ctypes.cast(A.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    B_ptr = ctypes.cast(B.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    C_ptr = ctypes.cast(C.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+
+    aShape = np.array(a_shape, dtype=np.int32).ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+    bShape = np.array(b_shape, dtype=np.int32).ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+    cShape = np.array(c_shape, dtype=np.int32).ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+
+    aDim = len(a_shape)
+    bDim = len(b_shape)
+    cDim = len(c_shape)
+
+    torch_matmul_time = performance.BangProfile((matmul, (C_clone, beta, A, B, alpha))) 
+    lib.matmul_cnnl.argtypes = [
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_float,
+        ctypes.c_float,
+        ctypes.c_int
+    ]           
+    custom_matmul_time = \
+    performance.BangProfile((lib.matmul_cnnl, 
+    (A_ptr, B_ptr, C_ptr, aShape, bShape, cShape, aDim, bDim, cDim, alpha, beta, byteSize)))
+
+    tmpa = matmul(C_clone, beta, A, B, alpha).to('cpu').detach().numpy().flatten()
+    
+    tmpb = C.to('cpu').detach().numpy().flatten()
+    
+    atol = max(abs(tmpa - tmpb))
+
+    rtol = atol / max(abs(tmpb) + 1e-8)
+
+
+    print("absolute error:%.4e"%(atol))
+    print("relative error:%.4e"%(rtol))
+def test_cuda(M, K, N, test_dtype):
+    device = "cuda"
     print(
         f"Testing Attention on {device} with M-K-N:{M, K, N} , dtype:{test_dtype}"
     )
@@ -67,23 +139,32 @@ def test(M, K, N, test_dtype, device):
 
     print("absolute error:%.4e"%(atol))
     print("relative error:%.4e"%(rtol))
+    
 # 解析命令行参数
-parser = argparse.ArgumentParser(description="Test softmax on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda'], required=True, help="Device to run the tests on.")
-args = parser.parse_args()    
+parser = argparse.ArgumentParser(description="Test matmul on different devices.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, help="Device to run the tests on.")
+args = parser.parse_args()   
 
-test_cases = [
+if args.device == "cuda":
+    test_cases = [
         # M, K, N, test_dtype, device
-        (1024, 128, 1024, torch.float32, 'cuda'),
-        (1024, 256, 1024, torch.float32, 'cuda'),
-        (1024, 512, 1024, torch.float32, 'cuda'),
-        (1024, 1024, 1024, torch.float32, 'cuda'),
-]
-filtered_test_cases = [
-    (M, K, N, test_dtype, device)
-    for M, K, N, test_dtype, device in test_cases
-    if device == args.device
-]
+        (1024, 128, 1024, torch.float32),
+        (1024, 256, 1024, torch.float32),
+        (1024, 512, 1024, torch.float32),
+        (1024, 1024, 1024, torch.float32),
+    ] 
+    for M, K, N, test_dtype in test_cases:
+        test_cuda(M, K, N, test_dtype)
 
-for M, K, N, test_dtype, device in filtered_test_cases:
-    test(M, K, N, test_dtype, device)
+elif args.device == "mlu":
+    import torch_mlu
+    test_cases = [
+        # alpha, beta, a_shape, b_shape, c_shape, a_stride, b_stride, c_stride, dtype
+        (1.0, 0.0, (6, 2048), (2048, 2048), (6, 2048)),
+        (1.0, 0.0, (2, 4, 2048), (2, 2048, 2048), (2, 4, 2048)),
+        (1.0, 0.0, (1, 2048), (2048, 2048), (1, 2048)),
+        (1.0, 1.0, (6, 2048), (2048, 2560), (6, 2560)),
+        (1.0 / 8.0, 0.0, (4, 8 * 6, 64), (4, 64, 6), (4, 8 * 6, 6)),
+    ]
+    for alpha, beta, a_shape, b_shape, c_shape in test_cases:
+        test_mlu(a_shape, b_shape, c_shape, alpha, beta)
