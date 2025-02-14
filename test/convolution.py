@@ -101,6 +101,7 @@ def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
             custom_convolution_time = \
             performance.BangProfile((lib.convolution_cnnl_f32, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
         if device == "npu":
+            
             torch_convolution_time = performance.AscendProfile((conv, (x, w, strides, pads, dilations))) 
             lib.convolution_aclnn_f32.argtypes = [
                 ctypes.POINTER(ctypes.c_void_p),
@@ -114,8 +115,10 @@ def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
                 ctypes.POINTER(ctypes.c_int),#y_shape
                 ctypes.c_int
             ]           
+            
             custom_convolution_time = \
             performance.AscendProfile((lib.convolution_aclnn_f32, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
+            
     if test_dtype == torch.float16:
         if device == "mlu":
             torch_convolution_time = performance.BangProfile((conv, (x, w, strides, pads, dilations))) 
@@ -134,8 +137,9 @@ def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
             custom_convolution_time = \
             performance.BangProfile((lib.convolution_cnnl_f16, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
         if device == "npu":
+            
             torch_convolution_time = performance.AscendProfile((conv, (x, w, strides, pads, dilations))) 
-            lib.convolution_aclnn_f32.argtypes = [
+            lib.convolution_aclnn_f16.argtypes = [
                 ctypes.POINTER(ctypes.c_void_p),
                 ctypes.POINTER(ctypes.c_void_p),
                 ctypes.POINTER(ctypes.c_void_p),
@@ -148,8 +152,10 @@ def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
                 ctypes.c_int
             ]           
             custom_convolution_time = \
-            performance.AscendProfile((lib.convolution_aclnn_f32, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
+            performance.AscendProfile((lib.convolution_aclnn_f16, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
+            
     performance.logBenchmark(torch_convolution_time, custom_convolution_time)
+    
 
     # 将结果转换回 PyTorch 张量以进行比较
     
@@ -220,42 +226,42 @@ test_cases = [
             (1,),
             (1,),
             torch.float32, 'npu'),    
-        # ((32, 3, 128, 128),
-        #     (64, 3, 5, 5),
-        #     (2, 2),
-        #     (2, 2),
-        #     (1, 1), torch.float32, 'npu'), 
-        # ((1, 1, 4, 4, 4),
-        #     (1, 1, 5, 5, 5),
-        #     (1, 1, 1),
-        #     (1, 1, 1),
-        #     (1, 1, 1), torch.float32, 'npu'), 
-        # ((32, 3, 32, 32, 32),
-        #     (64, 3, 5, 5, 5),
-        #     (3, 2, 2),
-        #     (4, 3, 3),
-        #     (2, 2, 1), torch.float32, 'npu'),  
-        # ((32, 3, 4),
-        #     (32, 3, 5),
-        #     (1,),
-        #     (1,),
-        #     (1,),
-        #     torch.float16, 'npu'),     
-        # ((32, 3, 128, 128),
-        #     (64, 3, 5, 5),
-        #     (2, 2),
-        #     (2, 2),
-        #     (1, 1), torch.float16, 'npu'), 
-        # ((1, 1, 4, 4, 4),
-        #     (1, 1, 5, 5, 5),
-        #     (1, 1, 1),
-        #     (1, 1, 1),
-        #     (1, 1, 1), torch.float16, 'npu'), 
-        # ((32, 3, 32, 32, 32),
-        #     (64, 3, 5, 5, 5),
-        #     (3, 2, 2),
-        #     (4, 3, 3),
-        #     (2, 2, 1), torch.float16, 'npu'),    
+        ((32, 3, 128, 128),
+            (64, 3, 5, 5),
+            (2, 2),
+            (2, 2),
+            (1, 1), torch.float32, 'npu'), 
+        ((1, 1, 4, 4, 4),
+            (1, 1, 5, 5, 5),
+            (1, 1, 1),
+            (1, 1, 1),
+            (1, 1, 1), torch.float32, 'npu'), 
+        ((32, 3, 32, 32, 32),
+            (64, 3, 5, 5, 5),
+            (3, 2, 2),
+            (4, 3, 3),
+            (2, 2, 1), torch.float32, 'npu'),  
+        ((32, 3, 4),
+            (32, 3, 5),
+            (1,),
+            (1,),
+            (1,),
+            torch.float16, 'npu'),     
+        ((32, 3, 128, 128),
+            (64, 3, 5, 5),
+            (2, 2),
+            (2, 2),
+            (1, 1), torch.float16, 'npu'), 
+        ((1, 1, 4, 4, 4),
+            (1, 1, 5, 5, 5),
+            (1, 1, 1),
+            (1, 1, 1),
+            (1, 1, 1), torch.float16, 'npu'), 
+        ((32, 3, 32, 32, 32),
+            (64, 3, 5, 5, 5),
+            (3, 2, 2),
+            (4, 3, 3),
+            (2, 2, 1), torch.float16, 'npu'),    
 ]
 
 filtered_test_cases = [

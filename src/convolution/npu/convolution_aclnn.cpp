@@ -1,5 +1,6 @@
 #include "acl/acl.h"
-#include "aclnnop/level2/aclnn_convolution.h"
+// #include "aclnnop/level2/aclnn_convolution.h"
+#include "aclnnop/aclnn_convolution.h"
 #include <iostream>
 #include <vector>
 
@@ -13,26 +14,49 @@
             exit(EXIT_FAILURE);                                      \
         }                                                            \
     }
-int Init(int32_t deviceId, aclrtContext *context, aclrtStream *stream)
+
+#define CHECK_RET(cond, return_expr) \
+    do                               \
+    {                                \
+        if (!(cond))                 \
+        {                            \
+            return_expr;             \
+        }                            \
+    } while (0)
+
+#define CHECK_FREE_RET(cond, return_expr) \
+    do                                    \
+    {                                     \
+        if (!(cond))                      \
+        {                                 \
+            Finalize(deviceId, stream);   \
+            return_expr;                  \
+        }                                 \
+    } while (0)
+
+#define LOG_PRINT(message, ...)         \
+    do                                  \
+    {                                   \
+        printf(message, ##__VA_ARGS__); \
+    } while (0)
+
+int Init(int32_t deviceId, aclrtStream *stream)
 {
     // 固定写法，AscendCL初始化
-    auto ret = aclInit(nullptr);
-    printf("init %d\n", ret);
-    // checkASCENDError(ret);
-    //  CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclInit failed. ERROR: %d\n", ret); return ret);
-    ret = aclrtSetDevice(deviceId);
-    checkASCENDError(ret);
-    // CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclrtSetDevice failed. ERROR: %d\n", ret); return ret);
-    ret = aclrtCreateContext(context, deviceId);
-    checkASCENDError(ret);
-    // CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclrtCreateContext failed. ERROR: %d\n", ret); return ret);
-    ret = aclrtSetCurrentContext(*context);
-    checkASCENDError(ret);
-    // CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclrtSetCurrentContext failed. ERROR: %d\n", ret); return ret);
+    // auto ret = aclInit(nullptr);
+    // CHECK_RET(ret == ACL_SUCCESS, printf("aclInit failed. ERROR: %d\n", ret); return ret);
+
+    auto ret = aclrtSetDevice(deviceId);
+    CHECK_RET(ret == ACL_SUCCESS, printf("aclrtSetDevice failed. ERROR: %d\n", ret); return ret);
     ret = aclrtCreateStream(stream);
-    checkASCENDError(ret);
-    // CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclrtCreateStream failed. ERROR: %d\n", ret); return ret);
+    CHECK_RET(ret == ACL_SUCCESS, printf("aclrtCreateStream failed. ERROR: %d\n", ret); return ret);
     return 0;
+}
+void Finalize(int32_t deviceId, aclrtStream &stream)
+{
+    aclrtDestroyStream(stream);
+    aclrtResetDevice(deviceId);
+    // aclFinalize();
 }
 template <typename T>
 void convolutionAclnnDevice(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *x_shape, int *w_shape, int *y_shape, int nDim, aclrtStream &stream)
@@ -65,6 +89,7 @@ void convolutionAclnnDevice(void *input, void *scale, void *output, int *pads, i
     std::vector<int64_t> weightStride(nDim, 1);
     std::vector<int64_t> outputDim(nDim);
     std::vector<int64_t> outputStride(nDim, 1);
+
     for (int i = nDim - 1; i >= 0; i--)
     {
         inputDim[i] = int64_t(x_shape[i]);
@@ -112,27 +137,41 @@ void convolutionAclnnDevice(void *input, void *scale, void *output, int *pads, i
     aclIntArray *convOutputpadding =
         aclCreateIntArray(outputPadding.data(), outputPadding.size());
     int groups = 1;
+    int8_t cubeMathType = 1;
     auto ret = aclnnConvolutionGetWorkspaceSize(
         inputTensor, weightTensor, nullptr, convstride, convpads,
         convdilation, false, convOutputpadding, int64_t(groups), outputTensor,
-        int8_t(1), &workspaceSize, &executor);
-    // CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnConvolutionGetWorkspaceSize failed. ERROR: %d\n", ret); return ret);
-    printf("getworkspace-%d\n", ret);
+        cubeMathType, &workspaceSize, &executor);
+
+    if (ret != ACL_SUCCESS)
+    {
+        printf("aclnnConvolutionGetWorkspaceSize failed. ERROR: %d\n", ret);
+    }
     void *workspaceAddr = nullptr;
     if (workspaceSize > 0)
     {
         ret = aclrtMalloc(&workspaceAddr, workspaceSize, ACL_MEM_MALLOC_HUGE_FIRST);
-        // //CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("allocate workspace failed. ERROR: %d\n", ret); return ret;);
-        printf("malloc-%d\n", ret);
+
+        if (ret != ACL_SUCCESS)
+        {
+            printf("allocate workspace failed. ERROR: %d\n", ret);
+        }
     }
 
     ret = aclnnConvolution(workspaceAddr, workspaceSize, executor,
                            stream);
-    // CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnConvolution failed. ERROR: %d\n", ret); return ret);
-    printf("conv-%d\n", ret);
+
+    if (ret != ACL_SUCCESS)
+    {
+        printf("aclnnConvolution failed. ERROR: %d\n", ret);
+    }
     ret = aclrtSynchronizeStream(stream);
-    // CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclrtSynchronizeStream failed. ERROR: %d\n", ret); return ret);
-    printf("sync-%d\n", ret);
+
+    if (ret != ACL_SUCCESS)
+    {
+        printf("aclrtSynchronizeStream failed. ERROR: %d\n", ret);
+    }
+
     aclDestroyTensor(inputTensor);
     aclDestroyTensor(weightTensor);
     aclDestroyTensor(outputTensor);
@@ -142,19 +181,24 @@ void convolutionAclnnDevice(void *input, void *scale, void *output, int *pads, i
     aclDestroyIntArray(convOutputpadding);
     aclDestroyIntArray(convdilation);
 
-    aclDestroyAclOpExecutor(executor);
+    // aclDestroyAclOpExecutor(executor);//似乎不支持destroy，一旦destroy测试报错
 }
 template <typename T>
 void convolutionAclnn(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *x_shape, int *w_shape, int *y_shape, int nDim)
 {
+    // static int count = 0;
+    // printf("count is %d \n", count);
     int32_t deviceId = 0;
-    aclrtContext context;
-    aclrtStream stream;
-    auto ret = Init(deviceId, &context, &stream);
 
-    printf("%d, %d\n", ret, ACL_SUCCESS);
-    // CHECK_RET(ret == 0, LOG_PRINT("Init acl failed. ERROR: %d\n", ret); return ret);
+    aclrtStream stream;
+    auto ret = Init(deviceId, &stream);
+    if (ret != ACL_SUCCESS)
+    {
+        printf("Init acl failed. ERROR: %d\n", ret);
+    }
+
     convolutionAclnnDevice<T>(input, scale, output, pads, strides, dilations, x_shape, w_shape, y_shape, nDim, stream);
+    Finalize(deviceId, stream);
 }
 extern "C" void convolution_aclnn_f32(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *x_shape, int *w_shape, int *y_shape, int nDim)
 {
