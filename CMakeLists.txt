@@ -90,7 +90,8 @@ elseif(USE_BANG)
     endif()
 
     # setup cncc flags
-    set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS} -fPIC -Wall -Werror -std=c++11 -pthread")
+    #set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS} -fPIC -Wall -Werror -std=c++11 -pthread")
+    set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS} -fPIC -std=c++11 -pthread")
     set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS} -O3")
     set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS}" "--bang-mlu-arch=mtp_592")
 

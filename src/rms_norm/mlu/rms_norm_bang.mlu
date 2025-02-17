@@ -305,14 +305,17 @@ void RMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int 
     auto y_ = reinterpret_cast<T *>(y);
     auto x_ = reinterpret_cast<T const *>(x);
     auto w_ = reinterpret_cast<Tw const *>(w);
+    //printf("%lu, %lu\n", sizeof(T), sizeof(Tw));
+    /***
     if(sizeof(T) == 2 && sizeof(Tw) == 4){
         
         RMSNormF<<<k_dim, k_type, queue>>>(y_, x_, w_, stride_y, stride_x, epsilon, n, d, dimS);
     }
-    else if(sizeof(T) == 4 && sizeof(Tw) == 4){
+    ***/
+    if(sizeof(T) == 4 && sizeof(Tw) == 4){
         RMSNorm<T><<<k_dim, k_type, queue>>>(y_, x_, w_, stride_y, stride_x, epsilon, n, d, dimS);
     }
-    else if(sizeof(T) == 2 && sizeof(Tw) == 2){
+    if(sizeof(T) == 2 && sizeof(Tw) == 2){
         RMSNorm<T><<<k_dim, k_type, queue>>>(y_, x_, w_, stride_y, stride_x, epsilon, n, d, dimS);
     }
     
@@ -325,14 +328,16 @@ extern "C" void RMSNorm_bang(void *y, void const *x, void const *w,
     cnrtQueue_t queue;
     CNRT_CHECK(cnrtSetDevice(0));
     CNRT_CHECK(cnrtQueueCreate(&queue));
+    /***
     if(byteT == 2 && byteTw == 4){
         RMSNormUnion<half, float>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
     }
-    else if(byteT == 2 && byteTw == 2){
-        RMSNormUnion<half, half>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
-    }
-    else if(byteT == 4 && byteTw == 4){
+    ***/
+    if(byteT == 4 && byteTw == 4){
         RMSNormUnion<float, float>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
+    }
+    if(byteT == 2 && byteTw == 2){
+        RMSNormUnion<half, half>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
     }
     CNRT_CHECK(cnrtQueueDestroy(queue));
 
