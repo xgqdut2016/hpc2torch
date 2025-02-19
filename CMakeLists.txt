@@ -21,13 +21,14 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 
 #使用 GLOB 命令找到 include/ 下的所有 .cpp 文件
 file(GLOB INCLUDE_SOURCE_FILES "include/cpu/**.cpp")
+file(GLOB ASCEND_INCLUDE_SOURCE_FILES "include/npu/**.cpp")#昇腾机器头文件
  
 # 使用 list(APPEND ...) 命令将 INCLUDE_SOURCE_FILES 添加到 CPP_SOURCE_FILES
 file(GLOB CPP_SOURCE_FILES "src/**/cpu/*.cpp")
 list(APPEND CPP_SOURCE_FILES ${INCLUDE_SOURCE_FILES})
 
 file(GLOB ASCEND_SOURCE_FILES "src/**/npu/*.cpp")
-list(APPEND ASCEND_SOURCE_FILES ${INCLUDE_SOURCE_FILES})
+list(APPEND ASCEND_SOURCE_FILES ${INCLUDE_SOURCE_FILES} ${ASCEND_INCLUDE_SOURCE_FILES})
 
 file(GLOB GPU_CUDA_FILES "src/**/gpu/*.cu")
 file(GLOB GPU_CUDNN_FILES "src/**/gpu/*.cpp")

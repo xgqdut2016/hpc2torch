@@ -3,7 +3,7 @@
 
 #include <cmath>
 #include <cstdint>
-
+#include "acl/acl.h"
 // convert half-precision float to single-precision float
 int Init(int32_t deviceId, aclrtStream *stream);
 
