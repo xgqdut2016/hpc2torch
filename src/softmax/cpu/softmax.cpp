@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <math.h>
-#include "common_cpu.h"
+#include "cpu/common_cpu.h"
 template <typename T>
 void softmax_cpu(void const *input, void *output, int size, int dimsize, int stride)
 {

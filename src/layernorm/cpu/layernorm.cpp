@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <math.h>
-#include "common_cpu.h"
+#include "cpu/common_cpu.h"
 template <typename T>
 void layernorm_cpu(void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize)
 {

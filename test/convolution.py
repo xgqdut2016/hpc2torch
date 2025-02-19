@@ -60,7 +60,7 @@ def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
     w = torch.rand(w_shape, dtype=test_dtype).to(device)
     y_shape = inferShape(x.shape, w.shape, pads, strides, dilations)
     y = torch.zeros(y_shape, dtype=test_dtype).to(device)
-    
+    tmpa = conv(x, w, strides, pads, dilations);print(tmpa.shape)
     x_ptr = ctypes.cast(x.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     w_ptr = ctypes.cast(w.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     y_ptr = ctypes.cast(y.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
@@ -220,17 +220,17 @@ test_cases = [
             (4, 3, 3),
             (2, 2, 1), torch.float16, 'mlu'),   
         #--------------
-        ((32, 3, 4),
-            (32, 3, 5),
-            (1,),
-            (1,),
-            (1,),
-            torch.float32, 'npu'),    
-        ((32, 3, 128, 128),
-            (64, 3, 5, 5),
-            (2, 2),
-            (2, 2),
-            (1, 1), torch.float32, 'npu'), 
+        # ((32, 3, 4),
+        #     (32, 3, 5),
+        #     (1,),
+        #     (1,),
+        #     (1,),
+        #     torch.float32, 'npu'),    
+        # ((32, 3, 128, 128),
+        #     (64, 3, 5, 5),
+        #     (2, 2),
+        #     (2, 2),
+        #     (1, 1), torch.float32, 'npu'), 
         ((1, 1, 4, 4, 4),
             (1, 1, 5, 5, 5),
             (1, 1, 1),

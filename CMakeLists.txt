@@ -20,7 +20,7 @@ option(USE_CPU "Enable CPU-only compilation" OFF)
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
 #使用 GLOB 命令找到 include/ 下的所有 .cpp 文件
-file(GLOB INCLUDE_SOURCE_FILES "include/**.cpp")
+file(GLOB INCLUDE_SOURCE_FILES "include/cpu/**.cpp")
  
 # 使用 list(APPEND ...) 命令将 INCLUDE_SOURCE_FILES 添加到 CPP_SOURCE_FILES
 file(GLOB CPP_SOURCE_FILES "src/**/cpu/*.cpp")
