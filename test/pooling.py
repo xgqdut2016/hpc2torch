@@ -121,6 +121,23 @@ def test(x_shape, k_shape, padding, stride, device):
             custom_Pooling_time = \
             performance.BangProfile((lib.MaxPooling_cnnl, (xData, yData, kData, pData, sData, dData, xShape, yShape, nDim, byteSize)))
             performance.logBenchmark(torch_Pooling_time, custom_Pooling_time)
+        elif device == "npu":
+            torch_Pooling_time = performance.AscendProfile((maxPool, (x, k_shape, padding, stride)))
+            lib.MaxPooling_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_Pooling_time = \
+            performance.AscendProfile((lib.MaxPooling_aclnn, (xData, yData, kData, pData, sData, dData, xShape, yShape, nDim, byteSize)))
+            performance.logBenchmark(torch_Pooling_time, custom_Pooling_time)
         tmpa = maxPool(x, k_shape, padding, stride).to('cpu').numpy().flatten()
     elif operator == "avg":
         if device == "mlu":
@@ -140,6 +157,23 @@ def test(x_shape, k_shape, padding, stride, device):
             custom_Pooling_time = \
             performance.BangProfile((lib.AvgPooling_cnnl, (xData, yData, kData, pData, sData, dData, xShape, yShape, nDim, byteSize)))
             performance.logBenchmark(torch_Pooling_time, custom_Pooling_time)
+        elif device == "npu":
+            torch_Pooling_time = performance.AscendProfile((avgPool, (x, k_shape, padding, stride)))
+            lib.AvgPooling_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_Pooling_time = \
+            performance.AscendProfile((lib.AvgPooling_aclnn, (xData, yData, kData, pData, sData, dData, xShape, yShape, nDim, byteSize)))
+            performance.logBenchmark(torch_Pooling_time, custom_Pooling_time)
         tmpa = avgPool(x, k_shape, padding, stride).to('cpu').numpy().flatten()
     tmpb = y.to('cpu').numpy().flatten()
 
@@ -152,24 +186,22 @@ def test(x_shape, k_shape, padding, stride, device):
     print("relative error:%.4e"%(rtol))
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="Test Pooling on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, help="Device to run the tests on.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 
 test_cases = [
-        # x_shape, kernel_shape, padding, strides, device
-        ((1, 1, 10), (3,), (1,), (1,), "mlu"), 
-        ((32, 3, 224, 224), (3, 3), (1, 1), (2, 2), "mlu"),
-        ((1, 1, 16, 16, 16), (5, 5, 5), (2, 2, 2), (2, 2, 2), "mlu"),
-        ((32, 128, 16, 16, 16), (5, 5, 5), (2, 2, 2), (2, 2, 2), "mlu"),
+        # x_shape, kernel_shape, padding, strides
+        ((1, 1, 10), (3,), (1,), (1,)), 
+        ((32, 3, 224, 224), (3, 3), (1, 1), (2, 2)),
+        # ((1, 1, 16, 16, 16), (5, 5, 5), (2, 2, 2), (2, 2, 2)), #昇腾不支持5维
+        # ((32, 128, 16, 16, 16), (5, 5, 5), (2, 2, 2), (2, 2, 2)),
         
 ]
-filtered_test_cases = [
-    (x_shape, kernel_shape, padding, strides, device)
-    for x_shape, kernel_shape, padding, strides, device in test_cases
-    if device == args.device
-]
+
 if args.device == 'mlu':
     import torch_mlu
+if args.device == 'npu':
+    import torch_npu
 # 执行过滤后的测试用例
-for x_shape, kernel_shape, padding, strides, device in filtered_test_cases:
-    test(x_shape, kernel_shape, padding, strides, device)
+for x_shape, kernel_shape, padding, strides in test_cases:
+    test(x_shape, kernel_shape, padding, strides, args.device)
