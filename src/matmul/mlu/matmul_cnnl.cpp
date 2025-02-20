@@ -2,6 +2,46 @@
 #include "cnnl_extra.h"
 #include <vector>
 
+void setMatrixTensorEx(cnnlTensorDescriptor_t desc, cnnlTensorLayout_t layout, cnnlDataType_t dataType, int *shape, int ndim){
+    int batch;
+    int rows;
+    int cols;
+    int batch_stride;
+    int row_stride;
+    int col_stride;
+    std::vector<int> stride(ndim, 1);
+    for(int i = ndim - 2; i >= 0; i--){
+        stride[i] = stride[i + 1] * shape[i + 1];
+    }
+    if(ndim == 2){
+        batch = 1;
+        batch_stride = 0;
+        rows = shape[0];
+        cols = shape[1];
+        row_stride = stride[0];
+        col_stride = stride[1];
+    }
+    else if(ndim == 3){
+        batch = shape[0];
+        batch_stride = (batch == 1 ? 0 :stride[0]);
+        rows = shape[1];
+        cols = shape[2];
+        row_stride = stride[1];
+        col_stride = stride[2];
+    }
+    if (ndim == 3) {
+        std::vector<int> dim_size = {batch, rows, cols};
+        std::vector<int> dim_stride = {batch_stride, row_stride, col_stride};
+        cnnlSetTensorDescriptorEx(desc, layout, dataType,
+                                  dim_size.size(), dim_size.data(), dim_stride.data());
+    } else if (ndim == 2) {
+        std::vector<int> dim_size = {rows, cols};
+        std::vector<int> dim_stride = {row_stride, col_stride};
+        cnnlSetTensorDescriptorEx(desc, layout, dataType,
+                                  dim_size.size(), dim_size.data(), dim_stride.data());
+    }
+
+}
 template <typename T>
 void matmulCnnlDevice(void const *aData, void const *bData, void *cData,
                       int *a_shape, int *b_shape, int *c_shape,
@@ -23,19 +63,13 @@ void matmulCnnlDevice(void const *aData, void const *bData, void *cData,
     int32_t transB = 0;
     cnnlTensorDescriptor_t aDesc, bDesc, cDesc;
     cnnlCreateTensorDescriptor(&aDesc);
-    cnnlSetTensorDescriptor(
-        aDesc, layout, dataType,
-        aDim, a_shape);
-
     cnnlCreateTensorDescriptor(&bDesc);
-    cnnlSetTensorDescriptor(
-        bDesc, layout, dataType,
-        bDim, b_shape);
-
     cnnlCreateTensorDescriptor(&cDesc);
-    cnnlSetTensorDescriptor(
-        cDesc, layout, dataType,
-        cDim, c_shape);
+
+    setMatrixTensorEx(aDesc, layout, dataType, a_shape, aDim);
+    setMatrixTensorEx(bDesc, layout, dataType, b_shape, bDim);
+    setMatrixTensorEx(cDesc, layout, dataType, c_shape, cDim);
+    
 
     cnnlMatMulDescriptor_t opDesc;
     cnnlMatMulAlgo_t algo;
