@@ -106,14 +106,12 @@ void matmulCnnlDevice(void const *aData, void const *bData, void *cData,
         aDim, a_shape);
 
     cnnlCreateTensorDescriptor(&bDesc);
-    cnnlSetTensorDescriptor(
-        bDesc, layout, dataType,
-        bDim, b_shape);
-
     cnnlCreateTensorDescriptor(&cDesc);
-    cnnlSetTensorDescriptor(
-        cDesc, layout, dataType,
-        cDim, c_shape);
+
+    setMatrixTensorEx(aDesc, layout, dataType, a_shape, aDim);
+    setMatrixTensorEx(bDesc, layout, dataType, b_shape, bDim);
+    setMatrixTensorEx(cDesc, layout, dataType, c_shape, cDim);
+    
 
     cnnlMatMulDescriptor_t opDesc;
     cnnlMatMulAlgo_t algo;
