@@ -53,7 +53,7 @@ elseif(USE_BANG)
     message(STATUS "BANG build enabled.")
     
     set(LIBRARY_OUTPUT_PATH "${CMAKE_BINARY_DIR}/lib")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -fPIC -std=c++11 -pthread -pipe")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -fPIC -std=c++17 -pthread -pipe")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${CMAKE_CXX_FLAGS} -O3")
     set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -fPIC")
 
@@ -90,7 +90,7 @@ elseif(USE_BANG)
     endif()
 
     # setup cncc flags
-    set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS} -fPIC -Wall -Werror -std=c++11 -pthread")
+    set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS} -fPIC -Wall -Werror -std=c++17 -pthread")
     set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS} -O3")
     set(BANG_CNCC_FLAGS "${BANG_CNCC_FLAGS}" "--bang-mlu-arch=mtp_592")
 

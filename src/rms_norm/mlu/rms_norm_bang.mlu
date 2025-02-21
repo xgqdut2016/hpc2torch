@@ -1,5 +1,6 @@
 #include "bang.h"
 #include "cnrt.h"
+#include <type_traits>
 
 const int NRAM_MAX_SIZE = 1024 * 256;
 __nram__ char nram_buffer[NRAM_MAX_SIZE];
@@ -286,32 +287,7 @@ __mlu_global__ void RMSNorm(T *destination, T const *source, T const *weight, in
 }
 
 
-
-void RMSNormUnionF(cnrtQueue_t queue, void *y, void const *x, void const *w, int stride_y, int stride_x, float epsilon, int n, int d){
-    cnrtDim3_t k_dim;
-    cnrtFunctionType_t k_type;
-
-    k_dim.x = 4;
-    k_dim.y = 1;
-    k_dim.z = 1;
-    k_type = CNRT_FUNC_TYPE_UNION1;
-    int dimS;
-    float mi = log2(d);
-    if (floor(mi) == mi) {
-        dimS = d;
-    } else {
-        dimS = pow(2, floor(mi) + 1);
-    }
-    auto y_ = reinterpret_cast<half *>(y);
-    auto x_ = reinterpret_cast<half const *>(x);
-    auto w_ = reinterpret_cast<float const *>(w);
-    RMSNormF<<<k_dim, k_type, queue>>>(y_, x_, w_, stride_y, stride_x, epsilon, n, d, dimS);
-    
-    
-    cnrtQueueSync(queue);
-
-}
-template<typename T>
+template<typename T, typename Tw>
 void RMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int stride_y, int stride_x, float epsilon, int n, int d){
     cnrtDim3_t k_dim;
     cnrtFunctionType_t k_type;
@@ -329,11 +305,13 @@ void RMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int 
     }
     auto y_ = reinterpret_cast<T *>(y);
     auto x_ = reinterpret_cast<T const *>(x);
-    auto w_ = reinterpret_cast<T const *>(w);
-    
-    RMSNorm<T><<<k_dim, k_type, queue>>>(y_, x_, w_, stride_y, stride_x, epsilon, n, d, dimS);
-    
-    
+    auto w_ = reinterpret_cast<Tw const *>(w);
+    if constexpr (std::is_same<T, half>::value && std::is_same<Tw, float>::value){//不能使用sizeof判断
+        RMSNormF<<<k_dim, k_type, queue>>>(y_, x_, w_, stride_y, stride_x, epsilon, n, d, dimS);
+    }
+    else{
+        RMSNorm<T><<<k_dim, k_type, queue>>>(y_, x_, w_, stride_y, stride_x, epsilon, n, d, dimS);
+    }
     
     cnrtQueueSync(queue);
 
@@ -345,14 +323,14 @@ extern "C" void RMSNorm_bang(void *y, void const *x, void const *w,
     CNRT_CHECK(cnrtQueueCreate(&queue));
     
     if(byteT == 2 && byteTw == 4){
-        RMSNormUnionF(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
+        RMSNormUnion<half, float>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
     }
     
-    if(byteT == 4 && byteTw == 4){
-        RMSNormUnion<float>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
+    else if(byteT == 4 && byteTw == 4){
+        RMSNormUnion<float, float>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
     }
-    if(byteT == 2 && byteTw == 2){
-        RMSNormUnion<half>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
+    else if(byteT == 2 && byteTw == 2){
+        RMSNormUnion<half, half>(queue, y, x, w, stride_y, stride_x, epsilon, n, d);
     }
     CNRT_CHECK(cnrtQueueDestroy(queue));
 
