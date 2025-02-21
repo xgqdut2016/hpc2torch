@@ -81,10 +81,13 @@ parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, h
 args = parser.parse_args()    
 
 test_cases = [
-        # test_shape, axis, test_dtype, eps, device
+        # y_shape, x_shape, w_shape, dtype, w_dtype
         ((16, 2048), (16, 2048), (2048,), torch.float16, torch.float16),
         ((16, 2048), (16, 2048), (2048,), torch.float32, torch.float32),
         ((16, 2048), (16, 2048), (2048,), torch.float16, torch.float32),
+        ((5, 4096), (5, 4096), (4096,), torch.float16, torch.float16),
+        ((5, 4096), (5, 4096), (4096,), torch.float32, torch.float32),
+        ((5, 4096), (5, 4096), (4096,), torch.float16, torch.float32),
          
 ]
 
