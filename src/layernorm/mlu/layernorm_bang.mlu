@@ -358,17 +358,20 @@ void layernormUnion(cnrtQueue_t queue, void const *input, void const *scale, voi
     cnrtFree(tmpGdram);
     cnrtQueueSync(queue);
 }
-extern "C" void layernorm_bang_f32(void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize){
+extern "C" void layernorm_bang_f32(void const *input, void const *scale, void const *bias, void *output, 
+float eps, int size, int behindsize, int byteSize){
     cnrtQueue_t queue;
     CNRT_CHECK(cnrtSetDevice(0));
     CNRT_CHECK(cnrtQueueCreate(&queue));
-    layernormUnion<float>(queue, input, scale, bias, output, eps, size, behindsize);
+    if (byteSize == 2)
+    {
+        layernormUnion<half>(queue, input, scale, bias, output, eps, size, behindsize);
+    }
+    else if (byteSize == 4)
+    {
+        layernormUnion<float>(queue, input, scale, bias, output, eps, size, behindsize);
+    }
+    
     CNRT_CHECK(cnrtQueueDestroy(queue));
 }
-extern "C" void layernorm_bang_f16(void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize){
-    cnrtQueue_t queue;
-    CNRT_CHECK(cnrtSetDevice(0));
-    CNRT_CHECK(cnrtQueueCreate(&queue));
-    layernormUnion<half>(queue, input, scale, bias, output, eps, size, behindsize);
-    CNRT_CHECK(cnrtQueueDestroy(queue));
-}
+

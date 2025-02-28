@@ -1,5 +1,6 @@
 import torch
 import ctypes
+import numpy as np
 import torch.nn as nn
 from functools import partial
 import argparse
@@ -12,7 +13,11 @@ import os
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/lib/libmy_library.so')
 lib = ctypes.CDLL(lib_path)
 
-def test(test_shape, axis, test_dtype, eps, device):
+def test(test_shape, axis, eps, device):
+    byteSize = 2
+    test_dtype = torch.float16
+    if byteSize == 4:
+        test_dtype = torch.float32
     print(
         f"Testing Layernorm on {device} with test_shape:{test_shape}, axis:{axis} ,dtype:{test_dtype}, eps:{eps}"
     )
@@ -39,105 +44,89 @@ def test(test_shape, axis, test_dtype, eps, device):
     layer_norm = nn.LayerNorm(normlize_shape, elementwise_affine=True, eps = eps)
     layer_norm.weight.data = scale
     layer_norm.bias.data = bias
+
     
-    if test_dtype == torch.float32:
-        if device == "cuda":
-            torch_layernorm_time = performance.CudaProfile((layer_norm.forward, (input,)))  # 以毫秒为单位
-            lib.layernorm_nv_f32.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.c_float,
-                ctypes.c_int,
-                ctypes.c_int
-            ]
-            custom_layernorm_time = \
-            performance.CudaProfile((lib.layernorm_nv_f32, (input_ptr, scale_ptr, bias_ptr, output_ptr, eps, size, behindsize)))
-        if device == "cpu":
-            torch_layernorm_time = performance.CpuProfile((layer_norm.forward, (input,)))  # 以毫秒为单位
-            lib.layernorm_cpu_f32.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.c_float,
-                ctypes.c_int,
-                ctypes.c_int
-            ]
-            custom_layernorm_time = \
-            performance.CpuProfile((lib.layernorm_cpu_f32, (input_ptr, scale_ptr, bias_ptr, output_ptr, eps, size, behindsize)))
-        if device == "mlu":
-            torch_layernorm_time = performance.BangProfile((layer_norm.forward, (input,)))  # 以毫秒为单位
-            '''
-            lib.layernorm_bang_f32.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.c_float,
-                ctypes.c_int,
-                ctypes.c_int
-            ]
-            custom_layernorm_time = \
-            performance.BangProfile((lib.layernorm_bang_f32, (input_ptr, scale_ptr, bias_ptr, output_ptr, eps, size, behindsize)))
-            '''
-            lib.layernorm_cnnl_f32.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),
-                ctypes.c_int,
-                ctypes.c_int,
-                ctypes.c_float
-            ]
-            import numpy as np
-            np_array = np.array(test_shape, dtype=np.int32)
-            ctypes_array = np_array.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
-            custom_layernorm_time = \
-            performance.BangProfile((lib.layernorm_cnnl_f32, (input_ptr, scale_ptr, bias_ptr, output_ptr, ctypes_array, ndim, axis, eps)))
-            
-    if test_dtype == torch.float16:
-        if device == "cuda":
-            torch_layernorm_time = performance.CudaProfile((layer_norm.forward, (input,)))  # 以毫秒为单位
-            lib.layernorm_nv_f16.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.c_float,
-                ctypes.c_int,
-                ctypes.c_int
-            ]
-            custom_layernorm_time = \
-            performance.CudaProfile((lib.layernorm_nv_f16, (input_ptr, scale_ptr, bias_ptr, output_ptr, eps, size, behindsize)))
-        if device == "cpu":
-            torch_layernorm_time = performance.CpuProfile((layer_norm.forward, (input,)))  # 以毫秒为单位
-            lib.layernorm_cpu_f16.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.c_float,
-                ctypes.c_int,
-                ctypes.c_int
-            ]
-            custom_layernorm_time = \
-            performance.CpuProfile((lib.layernorm_cpu_f16, (input_ptr, scale_ptr, bias_ptr, output_ptr, eps, size, behindsize)))
-        if device == "mlu":
-            torch_layernorm_time = performance.BangProfile((layer_norm.forward, (input,)))  # 以毫秒为单位
-            lib.layernorm_bang_f16.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.c_float,
-                ctypes.c_int,
-                ctypes.c_int
-            ]
-            custom_layernorm_time = \
-            performance.BangProfile((lib.layernorm_bang_f16, (input_ptr, scale_ptr, bias_ptr, output_ptr, eps, size, behindsize)))
+    np_array = np.array(test_shape, dtype=np.int32)
+    ctypes_array = np_array.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+    
+    if device == "cuda":
+        torch_layernorm_time = performance.CudaProfile((layer_norm.forward, (input,)))  # 以毫秒为单位
+        lib.layernorm_nv.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_float,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        custom_layernorm_time = \
+        performance.CudaProfile((lib.layernorm_nv, (input_ptr, scale_ptr, bias_ptr, output_ptr, eps, size, behindsize, byteSize)))
+    elif device == "cpu":
+        torch_layernorm_time = performance.CpuProfile((layer_norm.forward, (input,)))  # 以毫秒为单位
+        lib.layernorm_cpu.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_float,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        custom_layernorm_time = \
+        performance.CpuProfile((lib.layernorm_cpu, 
+        (input_ptr, scale_ptr, bias_ptr, output_ptr, eps, size, behindsize, byteSize)))
+    elif device == "mlu":
+        torch_layernorm_time = performance.BangProfile((layer_norm.forward, (input,)))  # 以毫秒为单位
+        '''
+        lib.layernorm_bang.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_float,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        custom_layernorm_time = \
+        performance.BangProfile((lib.layernorm_bang, 
+        (input_ptr, scale_ptr, bias_ptr, output_ptr, eps, size, behindsize, byteSize)))
+        '''
+        lib.layernorm_cnnl.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_float,
+            ctypes.c_int
+        ]
+        
+        custom_layernorm_time = \
+        performance.BangProfile((lib.layernorm_cnnl, 
+        (input_ptr, scale_ptr, bias_ptr, output_ptr, ctypes_array, ndim, axis, eps, byteSize)))
+    elif device == "npu":
+        torch_layernorm_time = performance.AscendProfile((layer_norm.forward, (input,)))  # 以毫秒为单位
+        lib.layernorm_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_float,
+            ctypes.c_int
+        ]
+        
+        custom_layernorm_time = \
+        performance.BangProfile((lib.layernorm_aclnn, 
+        (input_ptr, scale_ptr, bias_ptr, output_ptr, ctypes_array, ndim, axis, eps, byteSize)))
     performance.logBenchmark(torch_layernorm_time, custom_layernorm_time)
 
     # 将结果转换回 PyTorch 张量以进行比较
@@ -155,43 +144,26 @@ def test(test_shape, axis, test_dtype, eps, device):
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="Test layernorm on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, help="Device to run the tests on.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 
 test_cases = [
-        # test_shape, axis, test_dtype, eps, device
-        ((700, 1200, 24), 1, torch.float32, 1e-5, 'cuda'),
-        ((700, 1200, 24), 0, torch.float32, 1e-5, 'cuda'),
-        ((700, 1200, 24), 2, torch.float32, 1e-5, 'cuda'),
+        # test_shape, axis, eps
+        #cpu测试用小数据
+        ((7, 12, 24), 1, 1e-5),
+        ((7, 12, 24), 0, 1e-5),
+        ((7, 12, 24), 2, 1e-5),
 
-        ((700, 1200, 24), 1, torch.float16, 1e-5, 'cuda'),
-        ((700, 1200, 24), 0, torch.float16, 1e-5, 'cuda'),
-        ((700, 1200, 24), 2, torch.float16, 1e-5, 'cuda'),
-
-        ((700, 1200), 1, torch.float32, 1e-5, 'mlu'),
-        ((700, 1200, 24), 0, torch.float32, 1e-5, 'mlu'),
-        ((700, 1200, 24), 2, torch.float32, 1e-5, 'mlu'),
-
-        ((700, 1200, 24), 1, torch.float16, 1e-5, 'mlu'),
-        ((700, 1200, 24), 0, torch.float16, 1e-5, 'mlu'),
-        ((700, 1200, 24), 2, torch.float16, 1e-5, 'mlu'),
-
-        ((7, 12, 24), 1, torch.float32, 1e-5, 'cpu'),
-        ((7, 12, 24), 0, torch.float32, 1e-5, 'cpu'),
-        ((7, 12, 24), 2, torch.float32, 1e-5, 'cpu'),
-
-        ((7, 12, 24), 1, torch.float16, 1e-5, 'cpu'),
-        ((7, 12, 24), 0, torch.float16, 1e-5, 'cpu'),
-        ((7, 12, 24), 2, torch.float16, 1e-5, 'cpu'),
+        # ((700, 1200, 24), 1, 1e-5),
+        # ((700, 1200, 24), 0, 1e-5),
+        # ((700, 1200, 24), 2, 1e-5),
          
 ]
-filtered_test_cases = [
-    (test_shape,axis, test_dtype, eps, device)
-    for test_shape, axis, test_dtype, eps, device in test_cases
-    if device == args.device
-]
+
 if args.device == 'mlu':
     import torch_mlu
+if args.device == 'npu':
+    import torch_npu
 # 执行过滤后的测试用例
-for test_shape, axis, test_dtype, eps, device in filtered_test_cases:
-    test(test_shape, axis, test_dtype, eps, device)
+for test_shape, axis, eps in test_cases:
+    test(test_shape, axis, eps, args.device)

@@ -2,7 +2,7 @@
 #include "cnnl_extra.h"
 #include <vector>
 
-template<typename T>
+template <typename T>
 void layernormCnnlDevice(void const *source, void const *weight, void const *bias, void *destination, int *shape, int nDim, int axis, float eps, cnnlHandle_t &handle, cnrtQueue_t &queue)
 {
     cnnlTensorDescriptor_t yDesc, xDesc, filter_bias_desc, mean_rstd_desc;
@@ -11,31 +11,34 @@ void layernormCnnlDevice(void const *source, void const *weight, void const *bia
     cnnlCreateTensorDescriptor(&filter_bias_desc);
     cnnlCreateTensorDescriptor(&mean_rstd_desc);
 
-    
-
     std::vector<int> inDim(nDim);
     std::vector<int> outDim(nDim);
     std::vector<int> filter_biasDim(nDim - axis);
     std::vector<int> mean_rstdDim(axis);
     int mean_rstd_size = 1;
-    for (int i = 0; i < nDim; i++) {
+    for (int i = 0; i < nDim; i++)
+    {
         inDim[i] = shape[i];
         outDim[i] = shape[i];
-        if(i >= axis){
-            filter_biasDim[i - axis] = shape[i];            
+        if (i >= axis)
+        {
+            filter_biasDim[i - axis] = shape[i];
         }
-        else{
+        else
+        {
             mean_rstdDim[i] = shape[i];
             mean_rstd_size *= shape[i];
         }
     }
-    
+
     size_t dtype_size = 0;
     cnnlDataType_t dataType;
-    if(sizeof(T) == 2){
+    if (sizeof(T) == 2)
+    {
         dataType = CNNL_DTYPE_HALF;
     }
-    else if(sizeof(T) == 4){
+    else if (sizeof(T) == 4)
+    {
         dataType = CNNL_DTYPE_FLOAT;
     }
     cnnlGetSizeOfDataType(dataType, &dtype_size);
@@ -51,10 +54,10 @@ void layernormCnnlDevice(void const *source, void const *weight, void const *bia
     cnnlSetTensorDescriptor(
         mean_rstd_desc, CNNL_LAYOUT_ARRAY, dataType,
         mean_rstdDim.size(), mean_rstdDim.data());
-    
+
     T *mean_dev, *rstd_dev;
     size_t size_mean_rstd = (size_t)mean_rstd_size * dtype_size;
-    
+
     CNRT_CHECK(cnrtMalloc((void **)&mean_dev, size_mean_rstd));
     CNRT_CHECK(cnrtMalloc((void **)&rstd_dev, size_mean_rstd));
     size_t wsSize;
@@ -63,34 +66,33 @@ void layernormCnnlDevice(void const *source, void const *weight, void const *bia
     void *workspace;
     cnrtMalloc(&workspace, wsSize);
     cnnlLayerNormForward(handle,
-                        xDesc,
-                        source,
-                        axis,
-                        filter_bias_desc,
-                        weight,
-                        bias,
-                        eps,
-                        workspace,
-                        wsSize,
-                        yDesc,
-                        destination,
-                        mean_rstd_desc,
-                        mean_dev,
-                        rstd_dev);
-    
+                         xDesc,
+                         source,
+                         axis,
+                         filter_bias_desc,
+                         weight,
+                         bias,
+                         eps,
+                         workspace,
+                         wsSize,
+                         yDesc,
+                         destination,
+                         mean_rstd_desc,
+                         mean_dev,
+                         rstd_dev);
 
     CNRT_CHECK(cnrtQueueSync(queue));
 
     cnrtFree(workspace);
     cnrtFree(mean_dev);
     cnrtFree(rstd_dev);
-    
+
     cnnlDestroyTensorDescriptor(xDesc);
     cnnlDestroyTensorDescriptor(yDesc);
     cnnlDestroyTensorDescriptor(filter_bias_desc);
     cnnlDestroyTensorDescriptor(mean_rstd_desc);
 }
-template<typename T>
+template <typename T>
 void layernormCnnl(void const *input, void const *scale, void const *bias, void *output, int *shape, int nDim, int axis, float eps)
 {
     CNRT_CHECK(cnrtSetDevice(0));
@@ -101,20 +103,19 @@ void layernormCnnl(void const *input, void const *scale, void const *bias, void 
     cnnlSetQueue(handle, queue); // 将队列绑定到 handle 中, 此接口也可用来更改句柄中的队列。
 
     layernormCnnlDevice<T>(input, scale, bias, output, shape, nDim, axis, eps, handle, queue);
-    
+
     cnnlDestroy(handle);
     CNRT_CHECK(cnrtQueueDestroy(queue));
-
-    
 }
-extern "C" void layernorm_cnnl_f32(void const *input, void const *scale, void const *bias, void *output, int *shape, int nDim, int axis, float eps){
-    layernormCnnl<float>(input, scale, bias, output, shape, nDim, axis, eps);
+extern "C" void layernorm_cnnl(void const *input, void const *scale, void const *bias, void *output,
+                               int *shape, int nDim, int axis, float eps, int byteSize)
+{
+    if (byteSize == 2)
+    {
+        layernormCnnl<uint16_t>(input, scale, bias, output, shape, nDim, axis, eps);
+    }
+    else if (byteSize == 4)
+    {
+        layernormCnnl<float>(input, scale, bias, output, shape, nDim, axis, eps);
+    }
 }
-extern "C" void layernorm_cnnl_f16(void const *input, void const *scale, void const *bias, void *output, int *shape, int nDim, int axis, float eps){
-    layernormCnnl<uint16_t>(input, scale, bias, output, shape, nDim, axis, eps);
-}
-
-
-
-
-

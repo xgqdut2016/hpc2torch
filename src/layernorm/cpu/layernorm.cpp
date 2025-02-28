@@ -2,7 +2,7 @@
 #include <math.h>
 #include "cpu/common_cpu.h"
 template <typename T>
-void layernorm_cpu(void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize)
+void layernormDevice(void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize)
 {
     int frontsize = size / behindsize;
     auto source = reinterpret_cast<const T *>(input);
@@ -57,11 +57,15 @@ void layernorm_cpu(void const *input, void const *scale, void const *bias, void 
         }
     }
 }
-extern "C" void layernorm_cpu_f32(void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize)
+extern "C" void layernorm_cpu(void const *input, void const *scale, void const *bias, void *output,
+                              float eps, int size, int behindsize, int byteSize)
 {
-    layernorm_cpu<float>(input, scale, bias, output, eps, size, behindsize);
-}
-extern "C" void layernorm_cpu_f16(void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize)
-{
-    layernorm_cpu<uint16_t>(input, scale, bias, output, eps, size, behindsize);
+    if (byteSize == 2)
+    {
+        layernormDevice<uint16_t>(input, scale, bias, output, eps, size, behindsize);
+    }
+    else if (byteSize == 4)
+    {
+        layernormDevice<float>(input, scale, bias, output, eps, size, behindsize);
+    }
 }
