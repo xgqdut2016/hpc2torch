@@ -958,17 +958,18 @@ void softmaxUnion1(cnrtQueue_t queue, void const *input, void *output, int other
 
 
 
-extern "C" void softmax_bang_f32(void const *input, void *output, int othersize, int dimsize, int frontsize, int stride, int axis, int ndim) {
+extern "C" void softmax_bang(void const *input, void *output, int othersize, int dimsize, int frontsize, int stride, int axis, int ndim, int byteSize) {
     cnrtQueue_t queue;
     CNRT_CHECK(cnrtSetDevice(0));
     CNRT_CHECK(cnrtQueueCreate(&queue));
-    softmaxUnion1<float>(queue, input, output, othersize, dimsize, frontsize, stride, axis, ndim);
-    CNRT_CHECK(cnrtQueueDestroy(queue));
-}
-extern "C" void softmax_bang_f16(void const *input, void *output, int othersize, int dimsize, int frontsize, int stride, int axis, int ndim) {
-    cnrtQueue_t queue;
-    CNRT_CHECK(cnrtSetDevice(0));
-    CNRT_CHECK(cnrtQueueCreate(&queue));
-    softmaxUnion1<half>(queue, input, output, othersize, dimsize, frontsize, stride, axis, ndim);
+    if (byteSize == 4)
+    {
+        softmaxUnion1<float>(queue, input, output, othersize, dimsize, frontsize, stride, axis, ndim);
+    }
+    else if (byteSize == 2)
+    {
+        softmaxUnion1<half>(queue, input, output, othersize, dimsize, frontsize, stride, axis, ndim);
+    }
+    
     CNRT_CHECK(cnrtQueueDestroy(queue));
 }

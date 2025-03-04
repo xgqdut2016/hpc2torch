@@ -2,7 +2,7 @@
 #include <math.h>
 #include "cpu/common_cpu.h"
 template <typename T>
-void softmax_cpu(void const *input, void *output, int size, int dimsize, int stride)
+void softmaxDevice(void const *input, void *output, int size, int dimsize, int stride)
 {
     int othersize = size / dimsize;
     auto source = reinterpret_cast<const T *>(input);
@@ -59,11 +59,14 @@ void softmax_cpu(void const *input, void *output, int size, int dimsize, int str
         }
     }
 }
-extern "C" void softmax_cpu_f32(void const *input, void *output, int size, int dimsize, int stride)
+extern "C" void softmax_cpu(void const *input, void *output, int size, int dimsize, int stride, int byteSize)
 {
-    softmax_cpu<float>(input, output, size, dimsize, stride);
-}
-extern "C" void softmax_cpu_f16(void const *input, void *output, int size, int dimsize, int stride)
-{
-    softmax_cpu<uint16_t>(input, output, size, dimsize, stride);
+    if (byteSize == 4)
+    {
+        softmaxDevice<float>(input, output, size, dimsize, stride);
+    }
+    else if (byteSize == 2)
+    {
+        softmaxDevice<uint16_t>(input, output, size, dimsize, stride);
+    }
 }

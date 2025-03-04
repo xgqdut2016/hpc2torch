@@ -365,11 +365,14 @@ void softmaxLaunch(void const *input, void *output, int size, int dimsize, int s
     }
     cudaDeviceSynchronize();
 }
-extern "C" void softmax_nv_f32(void const *input, void *output, int size, int dimsize, int stride)
+extern "C" void softmax_nv(void const *input, void *output, int size, int dimsize, int stride, int byteSize)
 {
-    softmaxLaunch<float>(input, output, size, dimsize, stride);
-}
-extern "C" void softmax_nv_f16(void const *input, void *output, int size, int dimsize, int stride)
-{
-    softmaxLaunch<half>(input, output, size, dimsize, stride);
+    if (byteSize == 4)
+    {
+        softmaxLaunch<float>(input, output, size, dimsize, stride);
+    }
+    else if (byteSize == 2)
+    {
+        softmaxLaunch<half>(input, output, size, dimsize, stride);
+    }
 }
