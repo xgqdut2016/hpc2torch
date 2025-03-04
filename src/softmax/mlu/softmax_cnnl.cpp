@@ -2,8 +2,7 @@
 #include "cnrt.h"
 #include <vector>
 
-
-template<typename T>
+template <typename T>
 void softmaxCnnlDevice(T const *source, T *destination, int nDim, int axis, int *shape, cnnlHandle_t &handle, cnrtQueue_t &queue)
 {
     cnnlSoftmaxMode_t mode;
@@ -79,10 +78,12 @@ void softmaxCnnlDevice(T const *source, T *destination, int nDim, int axis, int 
     cnnlCreateTensorDescriptor(&aDesc);
     cnnlCreateTensorDescriptor(&cDesc);
     cnnlDataType_t dataType;
-    if(sizeof(T) == 2){
+    if (sizeof(T) == 2)
+    {
         dataType = CNNL_DTYPE_HALF;
     }
-    else if(sizeof(T) == 4){
+    else if (sizeof(T) == 4)
+    {
         dataType = CNNL_DTYPE_FLOAT;
     }
     cnnlSetTensorDescriptor(
@@ -91,24 +92,22 @@ void softmaxCnnlDevice(T const *source, T *destination, int nDim, int axis, int 
     cnnlSetTensorDescriptor(
         cDesc, CNNL_LAYOUT_ARRAY, dataType,
         outDim.size(), outDim.data());
-    
+
     T alpha = 1.0;
     T beta = 0.0;
     cnnlStatus_t stat =
         cnnlSoftmaxForward_v2(handle, CNNL_SOFTMAX_ACCURATE,
                               mode, CNNL_COMPUTATION_ULTRAHIGH_PRECISION,
                               &alpha, aDesc, source, &beta, cDesc, destination);
-  
+
     CNRT_CHECK(cnrtQueueSync(queue));
 
-   
     if (stat != CNNL_STATUS_SUCCESS)
         return;
     cnnlDestroyTensorDescriptor(aDesc);
     cnnlDestroyTensorDescriptor(cDesc);
-    
 }
-template<typename T>
+template <typename T>
 void softmaxCnnl(void const *input, void *output, int nDim, int axis, int *shape)
 {
     auto source = reinterpret_cast<const T *>(input);
@@ -121,22 +120,19 @@ void softmaxCnnl(void const *input, void *output, int nDim, int axis, int *shape
     cnnlSetQueue(handle, queue); // 将队列绑定到 handle 中, 此接口也可用来更改句柄中的队列。
 
     softmaxCnnlDevice(source, destination, nDim, axis, shape, handle, queue);
-    
+
     cnnlDestroy(handle);
     CNRT_CHECK(cnrtQueueDestroy(queue));
-
-    
 }
 
-extern "C" void softmax_cnnl_f32(void const *input, void *output, int nDim, int axis, int *shape){
-    softmaxCnnl<float>(input, output, nDim, axis, shape);
+extern "C" void softmax_cnnl(void const *input, void *output, int nDim, int axis, int *shape, int byteSize)
+{
+    if (byteSize == 4)
+    {
+        softmaxCnnl<float>(input, output, nDim, axis, shape);
+    }
+    else if (byteSize == 2)
+    {
+        softmaxCnnl<uint16_t>(input, output, nDim, axis, shape);
+    }
 }
-extern "C" void softmax_cnnl_f16(void const *input, void *output, int nDim, int axis, int *shape){
-    softmaxCnnl<uint16_t>(input, output, nDim, axis, shape);
-}
-
-
-
-
-
-
