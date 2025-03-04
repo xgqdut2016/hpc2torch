@@ -60,11 +60,9 @@ def sumReduce(data, axes):
     
     return output
 def test(inputShape, axes, device):
-    # operator = "Max"
-    # operator = "Mean"
-    # operator = "Min"
-    # operator = "Prod"
-    operator = "Sum"
+    # 昇腾的min,prod只支持针对固定某一个维度规约
+    operators = ["Max", "Mean", "Min", "Prod", "Sum"]
+    operator = operators[1]
     byteSize = 2
     
     if byteSize == 2:
@@ -110,6 +108,21 @@ def test(inputShape, axes, device):
             custom_reduce_time = \
             performance.BangProfile((lib.maxReduce_cnnl, (aData, axes_ptr, cData, aShape, cShape,
                                     ndim, len(axes), byteSize)))
+        elif device == "npu":
+            torch_reduce_time = performance.AscendProfile((maxReduce, (a, axes)))  # 可以替换为pRelu
+            lib.maxReduce_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_reduce_time = \
+            performance.AscendProfile((lib.maxReduce_aclnn, (aData, axes_ptr, cData, aShape, cShape,
+                                    ndim, len(axes), byteSize)))                            
         performance.logBenchmark(torch_reduce_time, custom_reduce_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = maxReduce(a, axes).to('cpu').numpy().flatten()
@@ -129,6 +142,21 @@ def test(inputShape, axes, device):
             custom_reduce_time = \
             performance.BangProfile((lib.minReduce_cnnl, (aData, axes_ptr, cData, aShape, cShape,
                                     ndim, len(axes), byteSize)))
+        elif device == "npu":
+            torch_reduce_time = performance.AscendProfile((minReduce, (a, axes)))  # 可以替换为pRelu
+            lib.minReduce_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_reduce_time = \
+            performance.AscendProfile((lib.minReduce_aclnn, (aData, axes_ptr, cData, aShape, cShape,
+                                    ndim, len(axes), byteSize)))  
         performance.logBenchmark(torch_reduce_time, custom_reduce_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = minReduce(a, axes).to('cpu').numpy().flatten()
@@ -148,6 +176,21 @@ def test(inputShape, axes, device):
             custom_reduce_time = \
             performance.BangProfile((lib.meanReduce_cnnl, (aData, axes_ptr, cData, aShape, cShape,
                                     ndim, len(axes), byteSize)))
+        elif device == "npu":
+            torch_reduce_time = performance.AscendProfile((meanReduce, (a, axes)))  # 可以替换为pRelu
+            lib.meanReduce_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_reduce_time = \
+            performance.AscendProfile((lib.meanReduce_aclnn, (aData, axes_ptr, cData, aShape, cShape,
+                                    ndim, len(axes), byteSize)))  
         performance.logBenchmark(torch_reduce_time, custom_reduce_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = meanReduce(a, axes).to('cpu').numpy().flatten()
@@ -167,6 +210,21 @@ def test(inputShape, axes, device):
             custom_reduce_time = \
             performance.BangProfile((lib.prodReduce_cnnl, (aData, axes_ptr, cData, aShape, cShape,
                                     ndim, len(axes), byteSize)))
+        elif device == "npu":
+            torch_reduce_time = performance.AscendProfile((prodReduce, (a, axes)))  # 可以替换为pRelu
+            lib.prodReduce_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_reduce_time = \
+            performance.AscendProfile((lib.prodReduce_aclnn, (aData, axes_ptr, cData, aShape, cShape,
+                                    ndim, len(axes), byteSize)))  
         performance.logBenchmark(torch_reduce_time, custom_reduce_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = prodReduce(a, axes).to('cpu').numpy().flatten()
@@ -186,6 +244,21 @@ def test(inputShape, axes, device):
             custom_reduce_time = \
             performance.BangProfile((lib.sumReduce_cnnl, (aData, axes_ptr, cData, aShape, cShape,
                                     ndim, len(axes), byteSize)))
+        elif device == "npu":
+            torch_reduce_time = performance.AscendProfile((sumReduce, (a, axes)))  # 可以替换为pRelu
+            lib.sumReduce_aclnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_reduce_time = \
+            performance.AscendProfile((lib.sumReduce_aclnn, (aData, axes_ptr, cData, aShape, cShape,
+                                    ndim, len(axes), byteSize)))  
         performance.logBenchmark(torch_reduce_time, custom_reduce_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = sumReduce(a, axes).to('cpu').numpy().flatten()
@@ -200,7 +273,7 @@ def test(inputShape, axes, device):
     print("relative error:%.4e"%(rtol))
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="Test reduce on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu'], required=True, help="Device to run the tests on.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 
 test_cases = [
@@ -215,6 +288,8 @@ test_cases = [
 
 if args.device == 'mlu':
     import torch_mlu
+if args.device == 'npu':
+    import torch_npu
 # 执行过滤后的测试用例
 for inputShape, axes in test_cases:
     test(inputShape, axes, args.device)
