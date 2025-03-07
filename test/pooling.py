@@ -179,7 +179,7 @@ def test(x_shape, k_shape, padding, stride, device):
 
     atol = max(abs(tmpa - tmpb))
 
-    rtol = atol / max(abs(tmpb) + 1e-8)
+    rtol = atol / (max(abs(tmpb)) + 1e-8)
 
 
     print("absolute error:%.4e"%(atol))
@@ -191,9 +191,9 @@ args = parser.parse_args()
 
 test_cases = [
         # x_shape, kernel_shape, padding, strides
-        ((1, 1, 10), (3,), (1,), (1,)), 
-        ((32, 3, 224, 224), (3, 3), (1, 1), (2, 2)),
-        # ((1, 1, 16, 16, 16), (5, 5, 5), (2, 2, 2), (2, 2, 2)), #昇腾不支持5维
+        ((1, 1, 10), (3,), (0,), (1,)), 
+        #((32, 3, 224, 224), (3, 3), (1, 1), (2, 2)),
+        # ((1, 1, 16, 16, 16), (5, 5, 5), (2, 2, 2), (2, 2, 2)), #昇腾容器不支持avg和max5维
         # ((32, 128, 16, 16, 16), (5, 5, 5), (2, 2, 2), (2, 2, 2)),
         
 ]

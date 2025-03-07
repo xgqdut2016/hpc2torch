@@ -2,7 +2,7 @@
 // #include "aclnnop/level2/aclnn_avgpool2d.h"
 // #include "aclnnop/level2/aclnn_max_pool.h"
 #include "aclnnop/aclnn_avgpool2d.h"
-#include "aclnnop/aclnn_avgpool3d.h"
+// #include "aclnnop/aclnn_avgpool3d.h"
 #include "aclnnop/aclnn_max_pool.h"
 #include <iostream>
 #include <vector>
@@ -45,10 +45,10 @@ void poolingAclnnDevice(void *input, void *output,
     {
         format = aclFormat::ACL_FORMAT_NCHW;
     }
-    else if (nDim == 5)
-    {
-        format = aclFormat::ACL_FORMAT_ND; // 5维向量用ND
-    }
+    // else if (nDim == 5)
+    // {
+    //     format = aclFormat::ACL_FORMAT_ND; // 5维向量用ND
+    // }
 
     std::vector<int64_t> inputDim(nDim);       // aclCreateTensor只支持int64_t的数组
     std::vector<int64_t> inputStride(nDim, 1); // 初始化为1
@@ -119,35 +119,35 @@ void poolingAclnnDevice(void *input, void *output,
             }
             ret = aclnnAvgPool2d(workspaceAddr, workspaceSize, executor,
                                  stream);
-        }
-        else if (nDim == 5)
-        {
-            auto ret = aclnnAvgPool3dGetWorkspaceSize(
-                inputTensor, kernelSizeArray, stridesArray, paddingsArray, ceil_mode, countIncludePad,
-                divisorOverride, outputTensor, &workspaceSize,
-                &executor);
             if (ret != ACL_SUCCESS)
             {
-                printf("aclnnAvgPool3dGetWorkspaceSize failed. ERROR: %d\n", ret);
+                printf("avg pool failed. ERROR: %d\n", ret);
             }
-            void *workspaceAddr = nullptr;
-            if (workspaceSize > 0)
-            {
-                ret = aclrtMalloc(&workspaceAddr, workspaceSize, ACL_MEM_MALLOC_HUGE_FIRST);
+        }
+        // else if (nDim == 5)
+        // {
+        //     auto ret = aclnnAvgPool3dGetWorkspaceSize(
+        //         inputTensor, kernelSizeArray, stridesArray, paddingsArray, ceil_mode, countIncludePad,
+        //         divisorOverride, outputTensor, &workspaceSize,
+        //         &executor);
+        //     if (ret != ACL_SUCCESS)
+        //     {
+        //         printf("aclnnAvgPool3dGetWorkspaceSize failed. ERROR: %d\n", ret);
+        //     }
+        //     void *workspaceAddr = nullptr;
+        //     if (workspaceSize > 0)
+        //     {
+        //         ret = aclrtMalloc(&workspaceAddr, workspaceSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
-                if (ret != ACL_SUCCESS)
-                {
-                    printf("allocate workspace failed. ERROR: %d\n", ret);
-                }
-            }
-            ret = aclnnAvgPool3d(workspaceAddr, workspaceSize, executor,
-                                 stream);
+        //         if (ret != ACL_SUCCESS)
+        //         {
+        //             printf("allocate workspace failed. ERROR: %d\n", ret);
+        //         }
+        //     }
+        //     ret = aclnnAvgPool3d(workspaceAddr, workspaceSize, executor,
+        //                          stream);
+        // }
         }
-        if (ret != ACL_SUCCESS)
-        {
-            printf("avg pool failed. ERROR: %d\n", ret);
-        }
-    }
     else if (mode == PoolingMode::Max)
     {
         const int64_t autoPad = 0;
