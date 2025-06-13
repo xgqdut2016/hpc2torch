@@ -13,9 +13,9 @@ import os
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/lib/libmy_library.so')
 lib = ctypes.CDLL(lib_path)
 
-def quantize(x, scale, zero, maxq):
+def quantize(x, scale, zero, minq, maxq):
     if scale.shape[1] == 1:
-        q = torch.clamp(torch.round(x / scale) + zero, 0, maxq)
+        q = torch.clamp(torch.round(x / scale) + zero, minq, maxq)
         return scale * (q - zero)
     else:
         group_size = x.shape[1] // scale.shape[1]
@@ -26,7 +26,7 @@ def quantize(x, scale, zero, maxq):
                     x[:, j * group_size : (j + 1) * group_size] / scale[:, j : j + 1]
                 )
                 + zero[:, j : j + 1],
-                0,
+                minq,
                 maxq,
             )
             y[:, j * group_size : (j + 1) * group_size] = scale[:, j : j + 1] * (
@@ -40,6 +40,7 @@ class Quantizer(nn.Module):
     def __init__(self, shape=1):
         super(Quantizer, self).__init__()
         self.register_buffer("maxq", torch.tensor(0))
+        self.register_buffer("minq", torch.tensor(0))
         self.register_buffer("scale", torch.zeros(shape))
         self.register_buffer("zero", torch.zeros(shape))
 
@@ -52,8 +53,14 @@ class Quantizer(nn.Module):
         norm=2.4,
         grid=100,
         maxshrink=0.8,
+        sign_ed=False,
     ):
-        self.maxq = torch.tensor(2**bits - 1)
+        if sign_ed:  # 有符号量化，范围是[-8,7]
+            self.maxq = torch.tensor(2 ** (bits - 1) - 1)
+            self.minq = -torch.tensor(2 ** (bits - 1))
+        else:  # 无符号量化，范围是[0,15]
+            self.maxq = torch.tensor(2**bits - 1)
+            self.minq = -torch.tensor(0)
         self.perchannel = perchannel
         self.sym = sym
         self.mse = mse
@@ -64,6 +71,7 @@ class Quantizer(nn.Module):
     def find_params(self, x, weight=False):
         dev = x.device
         self.maxq = self.maxq.to(dev)
+        self.minq = self.minq.to(dev)
 
         shape = x.shape
         if self.perchannel:
@@ -88,9 +96,9 @@ class Quantizer(nn.Module):
         xmin[tmp] = -1
         xmax[tmp] = +1
 
-        self.scale = (xmax - xmin) / self.maxq
+        self.scale = (xmax - xmin) / (self.maxq - self.minq)
         if self.sym:
-            self.zero = torch.full_like(self.scale, (self.maxq + 1) / 2)
+            self.zero = torch.full_like(self.scale, (self.maxq + self.minq + 1) / 2)
         else:
             self.zero = torch.round(-xmin / self.scale)
 
@@ -100,9 +108,11 @@ class Quantizer(nn.Module):
                 p = 1 - i / self.grid
                 xmin1 = p * xmin
                 xmax1 = p * xmax
-                scale1 = (xmax1 - xmin1) / self.maxq
+                scale1 = (xmax1 - xmin1) / (self.maxq - self.minq)
                 zero1 = torch.round(-xmin1 / scale1) if not self.sym else self.zero
-                q = quantize(x, scale1.unsqueeze(1), zero1.unsqueeze(1), self.maxq)
+                q = quantize(
+                    x, scale1.unsqueeze(1), zero1.unsqueeze(1), self.minq, self.maxq
+                )
                 q -= x
                 q.abs_()
                 q.pow_(self.norm)
@@ -139,7 +149,7 @@ class Quantizer(nn.Module):
 
     def quantize(self, x):
         if self.ready():
-            return quantize(x, self.scale, self.zero, self.maxq)
+            return quantize(x, self.scale, self.zero, self.minq, self.maxq)
         return x
 
     def enabled(self):
@@ -161,7 +171,7 @@ class GPTQ:
         self.nsamples = 0
 
     def add_batch(self, inp, out):
-        
+
         if len(inp.shape) == 2:
             inp = inp.unsqueeze(0)
         tmp = inp.shape[0]
@@ -199,7 +209,9 @@ class GPTQ:
         damp = percdamp * torch.mean(torch.diag(H))
         diag = torch.arange(self.columns, device=self.dev)
         H[diag, diag] += damp
-        H = torch.linalg.cholesky(H)
+        H = torch.linalg.cholesky(H.to("cpu")).to(
+            H.device
+        )  # 对于CUDA来说，这个地方直接在CUDA上做cholesky分解可能会失败
         H = torch.cholesky_inverse(H)
         H = torch.linalg.cholesky(H, upper=True)
         Hinv = H
@@ -239,6 +251,7 @@ class GPTQ:
                     w.unsqueeze(1),
                     self.quantizer.scale,
                     self.quantizer.zero,
+                    self.quantizer.minq,
                     self.quantizer.maxq,
                 ).flatten()
                 Q1[:, i] = q
@@ -253,20 +266,22 @@ class GPTQ:
 
             W[:, i2:] -= Err1.matmul(Hinv[i1:i2, i2:])
 
-        print('error', torch.sum(Losses).item())
+        print("error", torch.sum(Losses).item())
 
         self.weight = Q.reshape(self.weight.shape).to(self.weight.dtype)
         self.scale = scale.to(self.weight.dtype)
         self.zero = zero.to(self.weight.dtype)
 
 
-def get_scale_zero(b, a, c, group_size):
+def get_scale_zero(b, a, c, group_size, bits, sym, sign_ed):
     weight = b.clone()
     inp = a.clone()
     out = c.clone()
     gptq = GPTQ(weight)
     gptq.quantizer = Quantizer()
-    gptq.quantizer.configure(perchannel=True, sym=False, mse=False)
+    gptq.quantizer.configure(
+        bits=bits, perchannel=True, sym=sym, mse=False, sign_ed=sign_ed
+    )
     gptq.add_batch(inp, out)
     gptq.fasterquant(group_size=group_size)
 
@@ -275,10 +290,21 @@ def get_scale_zero(b, a, c, group_size):
         gptq.scale.to(weight.device),
         gptq.zero.to(weight.device),
     )
+def pack(weight, scale, zero, minq, maxq):
+    intweight = torch.clamp(torch.round(weight / scale + zero), minq, maxq).to(
+        torch.int32
+    )
+    qweight = torch.zeros(
+        [weight.shape[0], weight.shape[1] // 8], dtype=torch.int32, device=weight.device
+    )
+    for i in range(intweight.shape[1]):
+        qweight[:, i // 8] |= intweight[:, i] << (4 * (i % 8))
+    return qweight
 
-def mat(a, b):
-    dtype = b.dtype
-    ans = torch.matmul(b.to(torch.float32), a.t().to(torch.float32)).to(dtype)
+
+# PyTorch implementation for matrix multiplication
+def quantize_gptq(a, b):  # 昇腾芯片的CPU不支持转置计算
+    ans = torch.matmul(a.to(torch.float32), b.to(torch.float32)).to(b.dtype)
     return ans
 
 def test(torch_device,
@@ -290,32 +316,70 @@ def test(torch_device,
         f"Testing MatmulGptq on {torch_device}" f" M:{M}, K:{K}, N:{N}, dtype:{dtype}"
     )
     torch.manual_seed(12)
-    # Initialize tensors
-    a = 1e0 * torch.randn([M, K], dtype=dtype).to(torch_device)
+    a = 1e0 * torch.randn([K, M], dtype=dtype).to(torch_device)
     layer = nn.Linear(K, N)
-    b = 1e-3 * layer.weight.data.to(dtype).to(torch_device)
-    c = torch.zeros([M, N], dtype=dtype).to(torch_device).t()
+    b = 1e0 * layer.weight.data.to(dtype).to(torch_device)
+    c = torch.zeros([N, M], dtype=dtype).to(torch_device)
+    is_weight_transposed = False
+    sign_ed = False
+    sym = False
+    if torch_device != "cpu":
+        is_weight_transposed = True
 
     group_size = -1
     num_groups = 1
     if group_size == -1:
         num_groups = 1
     else:
-        num_groups = a.shape[1] / group_size
-
-    b_ref, s, z = get_scale_zero(b, a, c, group_size)
-
+        num_groups = K // group_size
     
-    output_ptr = ctypes.cast(c.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    inputA_ptr = ctypes.cast(a.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    inputB_ptr = ctypes.cast(b_ref.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    scale_ptr = ctypes.cast(s.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    zero_ptr = ctypes.cast(z.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    packed_weights = torch.zeros([N, K // 8], dtype=torch.int32).to(torch_device)
+    s = torch.zeros([N, num_groups], dtype=dtype).to(torch_device)
+    z = torch.zeros([N, num_groups], dtype=dtype).to(torch_device)
+
+    bits = 4
+    maxq = 2**bits - 1
+    minq = 0
+    if sign_ed:  # 有符号量化，范围是[-8,7]
+        maxq = 2 ** (bits - 1) - 1
+        minq = -(2 ** (bits - 1))
+
+    if torch_device == "cuda":
+        B_ref, packed_weight, s = gen_quant4(K, N, groupsize=group_size)
+        b = B_ref.t()
+        packed_weight = packed_weight.t()
+        s = s.t()
+        print(a.shape, b.shape, packed_weight.shape, s.shape)
+    if is_weight_transposed:
+        ans = quantize_gptq(a.t(), b.t())
+    else:
+        ans = quantize_gptq(b, a)
+    if torch_device == "cpu":
+        b_ref, s, z = get_scale_zero(
+            b, a.t(), c, group_size, bits, sym, sign_ed=sign_ed
+        )  # 无符号量化
+
+        packed_weights = pack(b_ref, s, z, minq, maxq)
+
+    if is_weight_transposed:
+        output_ptr = ctypes.cast(c.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        inputA_ptr = ctypes.cast(a.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        inputB_ptr = ctypes.cast(b.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        packed_weights_ptr = ctypes.cast(packed_weights.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        scale_ptr = ctypes.cast(s.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        zero_ptr = ctypes.cast(z.t().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    else:
+        output_ptr = ctypes.cast(c.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        inputA_ptr = ctypes.cast(a.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        inputB_ptr = ctypes.cast(b.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        packed_weights_ptr = ctypes.cast(packed_weights.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        scale_ptr = ctypes.cast(s.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        zero_ptr = ctypes.cast(z.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     
     
     if torch_device == "cpu":
-        torch_gptq_time = performance.CpuProfile((mat, (a, b)))  # 可以替换为mul, div
-        lib.gptq_cpu.argtypes = [
+        torch_gptq_time = performance.CpuProfile((quantize_gptq, (b, a)))  # 可以替换为mul, div
+        lib.quant_cpu.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -327,16 +391,48 @@ def test(torch_device,
             ctypes.c_int
 
         ]
-        custom_gptq_time = \
-        performance.CpuProfile((lib.gptq_cpu, (output_ptr, inputA_ptr, inputB_ptr, scale_ptr, zero_ptr, M, K, N, group_size)))
-    
-    performance.logBenchmark(torch_gptq_time, custom_gptq_time)
-    tmpa = mat(a, b).to('cpu').numpy().flatten()
-    tmpb = c.to('cpu').numpy().flatten()
-    torch.allclose(c, mat(a, b), atol=1e-3, rtol=1e-3)
-    atol = max(abs(tmpa - tmpb))
+        quant_time = 0
+        # quant_time = \
+        # performance.CpuProfile((lib.quant_cpu, 
+        # (inputA_ptr, inputB_ptr, packed_weights_ptr, scale_ptr, zero_ptr, M, K, N, group_size)))
+        lib.caculate_cpu.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
 
-    rtol = atol / max(abs(tmpb) + 1e-8)
+        ]
+        caculate_time = \
+        performance.CpuProfile((lib.caculate_cpu, 
+        (output_ptr, inputA_ptr, packed_weights_ptr, scale_ptr, zero_ptr, M, K, N, group_size)))
+    custom_gptq_time = quant_time + caculate_time
+    performance.logBenchmark(torch_gptq_time, custom_gptq_time)
+    atol = 1e-3
+    rtol = 1e-3
+    if is_weight_transposed:
+        tmpa = quantize_gptq(a.t(), b.t()).to('cpu').numpy().flatten()
+        tmpc = c.t().to('cpu').numpy().flatten()
+        for i in range(tmpa.shape[0]):
+            if abs(tmpa[i] - tmpc[i]) > atol + rtol * abs(tmpa[i]):
+                print(tmpa[i], tmpc[i], abs(tmpa[i] - tmpc[i]), rtol * abs(tmpa[i]))
+                break
+        torch.allclose(c.t(), quantize_gptq(a.t(), b.t()), atol=atol, rtol=rtol)
+    else:
+        tmpa = quantize_gptq(b, a).to('cpu').numpy().flatten()
+        tmpc = c.to('cpu').numpy().flatten()
+        for i in range(tmpa.shape[0]):
+            if abs(tmpa[i] - tmpc[i]) > atol + rtol * abs(tmpa[i]):
+                print(tmpa[i], tmpc[i], abs(tmpa[i] - tmpc[i]), rtol * abs(tmpa[i]))
+                break
+        torch.allclose(c, quantize_gptq(b, a), atol=atol, rtol=rtol)
+    atol = max(abs(tmpa - tmpc))
+
+    rtol = atol / max(abs(tmpc) + 1e-8)
 
 
     print("absolute error:%.4e"%(atol))
@@ -344,13 +440,21 @@ def test(torch_device,
 parser = argparse.ArgumentParser(description="Test gptq on different devices.")
 parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
-test_cases = [
-        # 
-        (1, 1024, 4),
-        (16, 1024, 4)
-         
-]
 
+test_cases = []
+
+MODELS = {
+    "7B": [(4096, 3 * 4096), (4096, 4096), (4096, 2 * 10752), (10752, 4096)],
+    # "13B": [(5120, 3 * 5120), (5120, 5120), (5120, 2 * 13568), (13568, 5120)],
+    # "33B": [(6656, 3 * 6656), (6656, 6656), (6656, 2 * 17664), (17664, 6656)],
+    # "70B": [(8192, 3 * 8192), (8192, 8192), (8192, 2 * 21760), (21760, 8192)],
+}
+
+# Loop through models and layers to generate the new _TEST_CASES
+for _, layers in MODELS.items():
+    for layer in layers:
+        for batch in [1, 16]:
+            test_cases.append(((batch, layer[0], layer[1])))
 if args.device == 'mlu':
     import torch_mlu
 if args.device == 'npu':

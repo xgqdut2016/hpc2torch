@@ -14,6 +14,41 @@ option(USE_ASCEND "Enable ASCEND compilation" OFF)
 option(USE_TECO "Enable TECO compilation" OFF)
 option(USE_CPU "Enable CPU-only compilation" OFF)
 
+set(CMAKE_CXX_STANDARD 17)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|i.86)")
+    # x86架构设置
+    message(STATUS "Target architecture: x86 (enabling AVX2/FMA)")
+    set(ARCH_CXX_FLAGS "-mavx2 -mfma -O3")
+    
+    # 检查编译器是否支持AVX2
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
+    if(COMPILER_SUPPORTS_AVX2)
+        set(ARCH_CXX_FLAGS "${ARCH_CXX_FLAGS} -mavx2")
+    else()
+        message(WARNING "Compiler does not support AVX2 instructions")
+    endif()
+    
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64|arm.*)")
+    # ARM架构设置
+    message(STATUS "Target architecture: ARM (enabling NEON)")
+    set(ARCH_CXX_FLAGS "-O3 -mcpu=generic+simd")
+    
+    # 检查编译器是否支持NEON
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-mfpu=neon" COMPILER_SUPPORTS_NEON)
+    if(COMPILER_SUPPORTS_NEON)
+        set(ARCH_CXX_FLAGS "${ARCH_CXX_FLAGS} -mfpu=neon")
+    else()
+        message(WARNING "Compiler does not support NEON instructions")
+    endif()
+else()
+    message(WARNING "Unknown architecture, using generic optimization flags")
+    set(ARCH_CXX_FLAGS "-O3")
+endif()
+
+# 应用架构特定的编译选项
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ARCH_CXX_FLAGS}")
 # 查找源文件
 # 添加头文件搜索路径  
 include_directories(${PROJECT_SOURCE_DIR}/include)
