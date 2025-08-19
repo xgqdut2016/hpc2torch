@@ -1,13 +1,14 @@
-#include "kunlun/common_kunlun.h"
+#include "kunlun/common_kernel_kunlun.h"
 
-template <typename T>
-__global__ void ropeKunlunDevice(T *destination, const T *source, 
-                const kunlun_size_t *pos_ids, const float *sin_table, const float *cos_table, 
-                kunlun_size_t nt,  kunlun_size_t nh, kunlun_size_t dh,
-                const kunlun_ptrdiff_t *x_strides, const kunlun_ptrdiff_t *y_strides, 
+template <typename T, typename Tindex>
+__global__ void RoPEKernel(T *destination, const T *source, 
+                const Tindex *pos_ids, const T *sin_table, const T *cos_table, 
+                kunlun_size_t seqlen,  kunlun_size_t nhead, kunlun_size_t dhead,
+                kunlun_ptrdiff_t x_stride_seqlen, kunlun_ptrdiff_t x_stride_nhead,
+                kunlun_ptrdiff_t y_stride_seqlen, kunlun_ptrdiff_t y_stride_nhead,
                 XPUStream stream){
     //ndim = 3
-    kunlun_size_t other_size = nt * nh;
+    kunlun_size_t other_size = seqlen * nhead;
 
     int cid = core_id();
     int ncores = core_num();
@@ -24,90 +25,92 @@ __global__ void ropeKunlunDevice(T *destination, const T *source,
     int ind_start = (thread_id < remain ? thread_id * step_hard : remain * step_hard + (thread_id - remain) * step_easy);
 
     constexpr int buf_size = 256;
-    __local__ T x_local[buf_size];//昆仑芯不支持bf16到f32的转换，只能默认T=float
+    __local__ T x_local[buf_size];
     __local__ T y_local[buf_size];
-    __local__ float sin_local[buf_size];
-    __local__ float cos_local[buf_size];
-    __local__ kunlun_size_t pos_local[1];
+    __local__ T sin_local[buf_size];
+    __local__ T cos_local[buf_size];
+    __local__ Tindex pos_local[1];
 
-    __local__ kunlun_ptrdiff_t x_strides_0; 
-    __local__ kunlun_ptrdiff_t x_strides_1; 
-
-    __local__ kunlun_ptrdiff_t y_strides_0; 
-    __local__ kunlun_ptrdiff_t y_strides_1; 
-    GM2LM(x_strides, &x_strides_0, 1 * sizeof(kunlun_ptrdiff_t));
-    GM2LM(x_strides + 1, &x_strides_1, 1 * sizeof(kunlun_ptrdiff_t));
-    GM2LM(y_strides, &y_strides_0, 1 * sizeof(kunlun_ptrdiff_t));
-    GM2LM(y_strides + 1, &y_strides_1, 1 * sizeof(kunlun_ptrdiff_t));
-    
-    int remain_dh = dh % buf_size;
-    int repeat = (dh - remain_dh) / buf_size;
+    int remain_dhead = dhead % buf_size;
+    int repeat = (dhead - remain_dhead) / buf_size;
 
     for(int i = ind_start; i < ind_start + step; i++){
         int ind_i = i;
         int ind_d = 0;
         int ind_s = 0;
-        ind_d += (ind_i % nh) * y_strides_1;
-        ind_s += (ind_i % nh) * x_strides_1;
-        ind_i /= nh;
-        ind_d += (ind_i % nt) * y_strides_0;
-        ind_s += (ind_i % nt) * x_strides_0;
-        GM2LM(pos_ids + (ind_i % nt), pos_local, 1 * sizeof(kunlun_size_t));
-        int index = pos_local[0] * dh / 2;
-        for(int r = 0; r < repeat + (remain_dh > 0 ? 1 : 0); r++){
-            int read_len = (r < repeat ? buf_size : remain_dh);
+        ind_d += (ind_i % nhead) * y_stride_nhead;
+        ind_s += (ind_i % nhead) * x_stride_nhead;
+        ind_i /= nhead;
+        ind_d += (ind_i % seqlen) * y_stride_seqlen;
+        ind_s += (ind_i % seqlen) * x_stride_seqlen;
+        GM2LM(pos_ids + (ind_i % seqlen), pos_local, 1 * sizeof(Tindex));
+        int index = static_cast<int>(pos_local[0]) * dhead / 2;
+        for(int r = 0; r < repeat + (remain_dhead > 0 ? 1 : 0); r++){
+            int read_len = (r < repeat ? buf_size : remain_dhead);
             int dk = read_len / 2;
             int start_d = ind_d + r * buf_size;
             int start_s = ind_s + r * buf_size;
             int sin_cos_index = index + r * buf_size / 2;
             GM2LM(source + start_s, x_local, read_len * sizeof(T));
-            GM2LM(sin_table + sin_cos_index, sin_local, dk * sizeof(float));
-            GM2LM(cos_table + sin_cos_index, cos_local, dk * sizeof(float));
-            for(int k = 0; k < dk; k++){
-                if constexpr (std::is_same<T, float>::value) {
+            GM2LM(sin_table + sin_cos_index, sin_local, dk * sizeof(T));
+            GM2LM(cos_table + sin_cos_index, cos_local, dk * sizeof(T));
+            if constexpr (xpu_std::is_same<T, float>::value || xpu_std::is_same<T, half>::value){
+                for(int k = 0; k < dk; k++){
                     y_local[2 * k] = x_local[2 * k] * cos_local[k] - x_local[2 * k + 1] * sin_local[k];
                     y_local[2 * k + 1] = x_local[2 * k] * sin_local[k] + x_local[2 * k + 1] * cos_local[k];
                 }
             }
+            /***
+            else if(xpu_std::is_same<T, bfloat16_t>::value){
+                for(int k = 0; k < dk; k++){
+                    float x_0 = __bfloat162float(x_local[2 * k]);
+                    float x_1 = __bfloat162float(x_local[2 * k + 1]);
+                    float sin_f = __bfloat162float(sin_local[k]);
+                    float cos_f = __bfloat162float(cos_local[k]);
+                    y_local[2 * k] = __float2bfloat16(x_0 * cos_f - x_1 * sin_f);
+                    y_local[2 * k + 1] = __float2bfloat16(x_0 * sin_f + x_1 * cos_f);
+                }
+            }
+            ***/
             mfence();
             LM2GM(y_local, destination + start_d, read_len * sizeof(T));
         }
     }
 }
 
-template <typename T>
+template <typename T, typename Tindex>
 void ropeKunlun(void *destination, const void *source, 
                 const void *pos_ids, const void *sin_table, const void *cos_table, 
-                kunlun_size_t nt,  kunlun_size_t nh, kunlun_size_t dh,
+                kunlun_size_t seqlen,  kunlun_size_t nhead, kunlun_size_t dhead,
                 const kunlun_ptrdiff_t *x_strides, const kunlun_ptrdiff_t *y_strides){
-    int ndim = 3;
     XPUStream stream;
     int err = xpu_stream_create(&stream);
-    char *workspace;
-    int ret = 0;
-    ret = xpu_malloc((void **)&workspace, ndim * 2 * sizeof(kunlun_ptrdiff_t));
-    assert(ret == 0);
-    kunlun_ptrdiff_t *xpu_x_strides = (kunlun_ptrdiff_t *)workspace;
-    kunlun_ptrdiff_t *xpu_y_strides = xpu_x_strides + ndim;
-    ret = xpu_memcpy(xpu_x_strides, x_strides, ndim * sizeof(kunlun_ptrdiff_t), XPU_HOST_TO_DEVICE);
-    assert(ret == 0);
-    ret = xpu_memcpy(xpu_y_strides, y_strides, ndim * sizeof(kunlun_ptrdiff_t), XPU_HOST_TO_DEVICE);
-    assert(ret == 0);
-    ropeKunlunDevice<T><<<8, 64, stream>>>((T *)destination, (T *)source, 
-                (kunlun_size_t *)pos_ids, (float *)sin_table, (float *)cos_table, 
-                nt, nh, dh,
-                xpu_x_strides, xpu_y_strides, stream);           
-    xpu_wait(stream);
-    xpu_free(workspace);   
-    
+    kunlun_ptrdiff_t x_stride_seqlen = (kunlun_ptrdiff_t)x_strides[0];
+    kunlun_ptrdiff_t x_stride_nhead = (kunlun_ptrdiff_t)x_strides[1];
+    kunlun_ptrdiff_t y_stride_seqlen = (kunlun_ptrdiff_t)y_strides[0];
+    kunlun_ptrdiff_t y_stride_nhead = (kunlun_ptrdiff_t)y_strides[1];
+    RoPEKernel<T, Tindex><<<8, 64, stream>>>((T *)destination, (T *)source, 
+                (Tindex *)pos_ids, (T *)sin_table, (T *)cos_table, 
+                seqlen,  nhead, dhead,
+                x_stride_seqlen, x_stride_nhead,
+                y_stride_seqlen, y_stride_nhead, stream);
+      
+    xpu_wait(stream); 
 }
+
 extern "C" void rope_kunlun(void *destination, const void *source, 
                 const void *pos_ids, const void *sin_table, const void *cos_table, 
                 kunlun_size_t nt,  kunlun_size_t nh, kunlun_size_t dh,
                 const kunlun_ptrdiff_t *x_strides, const kunlun_ptrdiff_t *y_strides, int byteSize)
 {      
     if (byteSize == 4){
-        ropeKunlun<float>(destination, source, 
+        ropeKunlun<float, int>(destination, source, 
+                pos_ids, sin_table, cos_table, 
+                nt, nh, dh,
+                x_strides, y_strides);
+    }
+    else if (byteSize == 2){
+        ropeKunlun<half, int>(destination, source, 
                 pos_ids, sin_table, cos_table, 
                 nt, nh, dh,
                 x_strides, y_strides);

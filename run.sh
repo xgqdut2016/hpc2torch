@@ -1,4 +1,4 @@
 mkdir build
 cd build
-cmake ../ -DUSE_CUDA=ON
+cmake ../ -DUSE_KUNLUN=ON
 make

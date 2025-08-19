@@ -1,7 +1,7 @@
 #ifndef __INFINIOP_BINARY_KUNLUN_H__
 #define __INFINIOP_BINARY_KUNLUN_H__
 
-#include "common_kunlun.h"
+#include "common_kernel_kunlun.h"
 #include "kunlun_type.h"
 #include <iostream>
 void host2device(const kunlun_size_t *c_shape, const kunlun_ptrdiff_t *c_strides, const kunlun_size_t *a_shape, const kunlun_ptrdiff_t *a_strides,

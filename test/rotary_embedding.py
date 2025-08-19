@@ -39,7 +39,7 @@ def sin_cos_table(pos, dim, torch_device, theta):
     return torch.sin(angles), torch.cos(angles)
 
 def test(test_shape, device):
-    byteSize = 4
+    byteSize = 2
     test_dtype = torch.float16
     if byteSize == 4:
         test_dtype = torch.float32
@@ -59,7 +59,8 @@ def test(test_shape, device):
     )
 
     sin_table, cos_table = sin_cos_table(pos, t.shape[2], t.device, theta)
-
+    if device == "kunlun":
+        sin_table = sin_table.to(test_dtype);cos_table = cos_table.to(test_dtype)
     t_ptr = ctypes.cast(t.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     output_ptr = ctypes.cast(output.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     pos_ptr = ctypes.cast(pos.data_ptr(), ctypes.POINTER(ctypes.c_void_p))

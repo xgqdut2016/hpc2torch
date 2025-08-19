@@ -66,8 +66,8 @@ list(APPEND CPP_SOURCE_FILES ${INCLUDE_SOURCE_FILES})
 file(GLOB ASCEND_SOURCE_FILES "src/**/npu/*.cpp")
 list(APPEND ASCEND_SOURCE_FILES ${INCLUDE_SOURCE_FILES} ${ASCEND_INCLUDE_SOURCE_FILES})
 
-file(GLOB KUNLUN_SOURCE_FILES "src/**/kunlun/*.xpu")
-list(APPEND KUNLUN_SOURCE_FILES ${KUNLUN_INCLUDE_SOURCE_FILES})
+file(GLOB KUNLUN_XPU_SOURCE_FILES "src/**/kunlun/*.xpu")
+list(APPEND KUNLUN_XPU_SOURCE_FILES ${KUNLUN_INCLUDE_SOURCE_FILES})
 
 if(USE_CUDA)
   if(EXISTS "/usr/local/cuda")  # 英伟达 CUDA 平台
@@ -247,18 +247,9 @@ elseif(USE_ASCEND)
     target_link_libraries(my_library ${ASCEND_HAL} ${ASCEND_CL} ${ASCEND_BASE} ${ASCEND_DNN} ${ASCEND_HCCL} stdc++)
 
 # 设置 CMake C++ 编译器为 Kunlun 提供的 clang++ 编译器
+file(GLOB KUNLUN_XPU_SOURCE_FILES "src/**/kunlun/*.xpu")
+list(APPEND KUNLUN_XPU_SOURCE_FILES ${KUNLUN_INCLUDE_SOURCE_FILES})
 elseif(USE_KUNLUN)
-    # set(CMAKE_C_COMPILER "/usr/local/xpu/XTDK/bin/clang")
-    # set(CMAKE_CXX_COMPILER "/usr/local/xpu/XTDK/bin/clang++")
-
-    message(STATUS "Kunlun build enabled.")
-
-    set(LIBRARY_OUTPUT_PATH "${CMAKE_BINARY_DIR}/lib")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -fPIC -std=c++17 -pthread -pipe")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${CMAKE_CXX_FLAGS} -O3")
-    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -fPIC")
-
-    # 设置 Kunlun SDK 路径
     if(NOT DEFINED ENV{KUNLUN_HOME})
         set(KUNLUN_HOME "/usr/local/kunlun" CACHE PATH "Path to Kunlun SDK")
     else()
@@ -266,59 +257,80 @@ elseif(USE_KUNLUN)
     endif()
 
     message(STATUS "KUNLUN_HOME=${KUNLUN_HOME}")
-    if(EXISTS ${KUNLUN_HOME})
-        include_directories("${KUNLUN_HOME}/include")
-        link_directories("${KUNLUN_HOME}/lib64")
-    else()
+
+    if(NOT EXISTS ${KUNLUN_HOME})
         message(FATAL_ERROR "Kunlun SDK not found. Please set KUNLUN_HOME environment variable.")
     endif()
 
-    set(XTDK_DIR "${KUNLUN_HOME}/XTDK")
+    set(XTDK_DIR "${KUNLUN_HOME}/xtdk")
+    set(XRE_DIR "${KUNLUN_HOME}/xre")
+    set(XDNN_DIR "${KUNLUN_HOME}/xhpc/xdnn")
 
-    # 设置编译 .xpu 文件的规则
-    set(KUNLUN_XPU_OBJECTS "")
+    include_directories(
+        ${CMAKE_SOURCE_DIR}/include
+        ${KUNLUN_HOME}/include
+        ${XRE_DIR}/include
+        ${XDNN_DIR}/include
+        ${XTDK_DIR}/include
+    )
 
-    # 设置中间文件输出目录
+    link_directories(
+        ${XRE_DIR}/so
+        ${XDNN_DIR}/so
+        ${KUNLUN_HOME}/lib64
+    )
+
+    # 定义中间目录
     set(KUNLUN_OBJ_DIR "${CMAKE_BINARY_DIR}/kunlun_objs")
+    file(MAKE_DIRECTORY ${KUNLUN_OBJ_DIR})
 
-    file(MAKE_DIRECTORY ${KUNLUN_OBJ_DIR})  # 创建目录
-
-    foreach(xpu_file ${KUNLUN_SOURCE_FILES})
+    # 所有 .xpu 文件单独生成 .o
+    set(KUNLUN_XPU_OBJECTS "")
+    foreach(xpu_file ${KUNLUN_XPU_SOURCE_FILES})
         get_filename_component(fname ${xpu_file} NAME_WE)
-
-        # 把中间产物移到 kunlun_objs 目录
         set(obj_base "${KUNLUN_OBJ_DIR}/${fname}")
         set(object_file "${obj_base}.o")
         set(bin_object "${obj_base}.device.bin.o")
-        
+
         add_custom_command(
             OUTPUT ${object_file} ${bin_object}
             COMMAND ${XTDK_DIR}/bin/clang++
-                --sysroot=/ --target=aarch64-linux-gnu
-                -fPIC -pie --xpu-arch=xpu2
-                --basename ${obj_base} -std=c++11 -O2 -fno-builtin -g -c ${xpu_file} -v
-                -I${CMAKE_SOURCE_DIR}/include
-                -I${KUNLUN_HOME}/include
+                    -fPIC
+                    --xpu-arch=xpu3
+                    -x xpu                    # <- 关键：告诉 Clang 这是 xpu 文件
+                    --basename ${obj_base}
+                    -std=c++17 -O2 -fno-builtin -g
+                    -c ${xpu_file} -v
+                    -I${CMAKE_SOURCE_DIR}/include
+                    -I${KUNLUN_HOME}/include
+                    -I${XRE_DIR}/include
+                    -I${XDNN_DIR}/include
             DEPENDS ${xpu_file}
             COMMENT "Compiling Kunlun XPU kernel ${xpu_file}"
+            VERBATIM
         )
 
         list(APPEND KUNLUN_XPU_OBJECTS ${object_file} ${bin_object})
     endforeach()
 
-    # 定义目标
+    # 单独 target 只依赖这些对象文件
     add_custom_target(kunlun_xpu_kernels ALL DEPENDS ${KUNLUN_XPU_OBJECTS})
 
-    # 编译其他源代码并链接库
-    add_library(my_library SHARED ${KUNLUN_SOURCE_FILES} ${KUNLUN_XPU_OBJECTS})
+
+
+    add_library(my_library SHARED ${KUNLUN_XPU_OBJECTS})
     add_dependencies(my_library kunlun_xpu_kernels)
+
+    target_include_directories(my_library PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${KUNLUN_HOME}/include
+        ${XRE_DIR}/include
+        ${XDNN_DIR}/include
+        ${XTDK_DIR}/include
+    )
+
     target_compile_options(my_library PRIVATE -Wall -Werror -fPIC)
-    target_include_directories(my_library PRIVATE ${CMAKE_SOURCE_DIR}/include)
     target_link_libraries(my_library PRIVATE stdc++ xpuapi xpurt)
-
-
-    # 设置 C++ 标准
-    set_target_properties(my_library PROPERTIES CXX_STANDARD 17)
     set_target_properties(my_library PROPERTIES LINKER_LANGUAGE CXX)
     
 elseif(USE_TECO)
