@@ -150,11 +150,14 @@ void convolutionAclnn(void *input, void *scale, void *output, int *pads, int *st
     convolutionAclnnDevice<T>(input, scale, output, pads, strides, dilations, x_shape, w_shape, y_shape, nDim, stream);
     Finalize(deviceId, stream);
 }
-extern "C" void convolution_aclnn_f32(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *x_shape, int *w_shape, int *y_shape, int nDim)
+extern "C" void convolution_aclnn_f32(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *x_shape, int *w_shape, int *y_shape, int nDim, int byteSize)
 {
-    convolutionAclnn<float>(input, scale, output, pads, strides, dilations, x_shape, w_shape, y_shape, nDim);
-}
-extern "C" void convolution_aclnn_f16(void *input, void *scale, void *output, int *pads, int *strides, int *dilations, int *x_shape, int *w_shape, int *y_shape, int nDim)
-{
-    convolutionAclnn<uint16_t>(input, scale, output, pads, strides, dilations, x_shape, w_shape, y_shape, nDim);
+    if (byteSize == 4)
+    {
+        convolutionAclnn<float>(input, scale, output, pads, strides, dilations, x_shape, w_shape, y_shape, nDim);
+    }
+    else if (byteSize == 2)
+    {
+        convolutionAclnn<uint16_t>(input, scale, output, pads, strides, dilations, x_shape, w_shape, y_shape, nDim);
+    }
 }

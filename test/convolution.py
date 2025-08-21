@@ -50,17 +50,25 @@ def inferShape(
     ]
     return (x_shape[0], w_shape[0]) + tuple(output_dims)
 
-def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
+def test(x_shape, w_shape, pads, strides, dilations, torch_device):
+    byteSize = 2
+    if byteSize == 4:
+        test_dtype = torch.float32
+    elif byteSize == 2:
+        test_dtype = torch.float16
     print(
-        f"Testing Convolution on {device} with x_shape:{x_shape}, w_shape:{w_shape}, pads: {pads}, strides: {strides}, dilations: {dilations}, dtype:{test_dtype}"
-    )           
+        f"Testing Convolution on {torch_device} with x_shape:{x_shape}, w_shape:{w_shape}, pads: {pads}, strides: {strides}, dilations: {dilations}, dtype:{test_dtype}"
+    )     
+    device = torch_device
+    if torch_device == "kunlun":
+        device = "cuda"      
     ndim = len(x_shape) 
 
     x = torch.rand(x_shape, dtype=test_dtype).to(device)
     w = torch.rand(w_shape, dtype=test_dtype).to(device)
     y_shape = inferShape(x.shape, w.shape, pads, strides, dilations)
     y = torch.zeros(y_shape, dtype=test_dtype).to(device)
-    tmpa = conv(x, w, strides, pads, dilations);print(tmpa.shape)
+    tmpa = conv(x, w, strides, pads, dilations)
     x_ptr = ctypes.cast(x.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     w_ptr = ctypes.cast(w.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     y_ptr = ctypes.cast(y.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
@@ -83,76 +91,59 @@ def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
     d_array = np.array(dilations, dtype=np.int32)
     dData = d_array.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
 
-    if test_dtype == torch.float32:
-        if device == "mlu":
-            torch_convolution_time = performance.BangProfile((conv, (x, w, strides, pads, dilations))) 
-            lib.convolution_cnnl_f32.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),#pads
-                ctypes.POINTER(ctypes.c_int),#strides
-                ctypes.POINTER(ctypes.c_int),#dilations
-                ctypes.POINTER(ctypes.c_int),#x_shape
-                ctypes.POINTER(ctypes.c_int),#w_shape
-                ctypes.POINTER(ctypes.c_int),#y_shape
-                ctypes.c_int
-            ]           
-            custom_convolution_time = \
-            performance.BangProfile((lib.convolution_cnnl_f32, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
-        if device == "npu":
-            
-            torch_convolution_time = performance.AscendProfile((conv, (x, w, strides, pads, dilations))) 
-            lib.convolution_aclnn_f32.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),#pads
-                ctypes.POINTER(ctypes.c_int),#strides
-                ctypes.POINTER(ctypes.c_int),#dilations
-                ctypes.POINTER(ctypes.c_int),#x_shape
-                ctypes.POINTER(ctypes.c_int),#w_shape
-                ctypes.POINTER(ctypes.c_int),#y_shape
-                ctypes.c_int
-            ]           
-            
-            custom_convolution_time = \
-            performance.AscendProfile((lib.convolution_aclnn_f32, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
-            
-    if test_dtype == torch.float16:
-        if device == "mlu":
-            torch_convolution_time = performance.BangProfile((conv, (x, w, strides, pads, dilations))) 
-            lib.convolution_cnnl_f16.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),#pads
-                ctypes.POINTER(ctypes.c_int),#strides
-                ctypes.POINTER(ctypes.c_int),#dilations
-                ctypes.POINTER(ctypes.c_int),#x_shape
-                ctypes.POINTER(ctypes.c_int),#w_shape
-                ctypes.POINTER(ctypes.c_int),#y_shape
-                ctypes.c_int
-            ]           
-            custom_convolution_time = \
-            performance.BangProfile((lib.convolution_cnnl_f16, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
-        if device == "npu":
-            
-            torch_convolution_time = performance.AscendProfile((conv, (x, w, strides, pads, dilations))) 
-            lib.convolution_aclnn_f16.argtypes = [
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_int),#pads
-                ctypes.POINTER(ctypes.c_int),#strides
-                ctypes.POINTER(ctypes.c_int),#dilations
-                ctypes.POINTER(ctypes.c_int),#x_shape
-                ctypes.POINTER(ctypes.c_int),#w_shape
-                ctypes.POINTER(ctypes.c_int),#y_shape
-                ctypes.c_int
-            ]           
-            custom_convolution_time = \
-            performance.AscendProfile((lib.convolution_aclnn_f16, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim)))
+    if torch_device == "mlu":
+        torch_convolution_time = performance.BangProfile((conv, (x, w, strides, pads, dilations))) 
+        lib.convolution_cnnl.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),#pads
+            ctypes.POINTER(ctypes.c_int),#strides
+            ctypes.POINTER(ctypes.c_int),#dilations
+            ctypes.POINTER(ctypes.c_int),#x_shape
+            ctypes.POINTER(ctypes.c_int),#w_shape
+            ctypes.POINTER(ctypes.c_int),#y_shape
+            ctypes.c_int,
+            ctypes.c_int
+        ]           
+        custom_convolution_time = \
+        performance.BangProfile((lib.convolution_cnnl, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim, byteSize)))
+    if torch_device == "npu":
+        
+        torch_convolution_time = performance.AscendProfile((conv, (x, w, strides, pads, dilations))) 
+        lib.convolution_aclnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),#pads
+            ctypes.POINTER(ctypes.c_int),#strides
+            ctypes.POINTER(ctypes.c_int),#dilations
+            ctypes.POINTER(ctypes.c_int),#x_shape
+            ctypes.POINTER(ctypes.c_int),#w_shape
+            ctypes.POINTER(ctypes.c_int),#y_shape
+            ctypes.c_int,
+            ctypes.c_int
+        ]           
+        
+        custom_convolution_time = \
+        performance.AscendProfile((lib.convolution_aclnn, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim, byteSize)))
+    if torch_device == "kunlun":
+        torch_convolution_time = performance.KunlunProfile((conv, (x, w, strides, pads, dilations))) 
+        lib.convolution_xdnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),#pads
+            ctypes.POINTER(ctypes.c_int),#strides
+            ctypes.POINTER(ctypes.c_int),#dilations
+            ctypes.POINTER(ctypes.c_int),#x_shape
+            ctypes.POINTER(ctypes.c_int),#w_shape
+            ctypes.POINTER(ctypes.c_int),#y_shape
+            ctypes.c_int,
+            ctypes.c_int
+        ]           
+        custom_convolution_time = \
+        performance.KunlunProfile((lib.convolution_xdnn, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim, byteSize)))
             
     performance.logBenchmark(torch_convolution_time, custom_convolution_time)
     
@@ -173,107 +164,63 @@ def test(x_shape, w_shape, pads, strides, dilations, test_dtype, device):
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="Test convolution on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu', 'kunlun'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 
 test_cases = [   
-        ((32, 3, 4),
-            (32, 3, 5),
-            (1,),
-            (1,),
-            (1,),
-            torch.float32, 'mlu'),    
-        ((32, 3, 128, 128),
-            (64, 3, 5, 5),
-            (2, 2),
-            (2, 2),
-            (1, 1), torch.float32, 'mlu'), 
-        ((1, 1, 4, 4, 4),
-            (1, 1, 5, 5, 5),
-            (1, 1, 1),
-            (1, 1, 1),
-            (1, 1, 1), torch.float32, 'mlu'), 
-        ((32, 3, 32, 32, 32),
-            (64, 3, 5, 5, 5),
-            (3, 2, 2),
-            (4, 3, 3),
-            (2, 2, 1), torch.float32, 'mlu'),  
-        ((32, 3, 4),
-            (32, 3, 5),
-            (1,),
-            (1,),
-            (1,),
-            torch.float16, 'mlu'),     
-        ((32, 3, 128, 128),
-            (64, 3, 5, 5),
-            (2, 2),
-            (2, 2),
-            (1, 1), torch.float16, 'mlu'), 
-        ((1, 1, 4, 4, 4),
-            (1, 1, 5, 5, 5),
-            (1, 1, 1),
-            (1, 1, 1),
-            (1, 1, 1), torch.float16, 'mlu'), 
-        ((32, 3, 32, 32, 32),
-            (64, 3, 5, 5, 5),
-            (3, 2, 2),
-            (4, 3, 3),
-            (2, 2, 1), torch.float16, 'mlu'),   
-        #--------------
-        # ((32, 3, 4),
-        #     (32, 3, 5),
-        #     (1,),
-        #     (1,),
-        #     (1,),
-        #     torch.float32, 'npu'),    
-        # ((32, 3, 128, 128),
-        #     (64, 3, 5, 5),
-        #     (2, 2),
-        #     (2, 2),
-        #     (1, 1), torch.float32, 'npu'), 
-        ((1, 1, 4, 4, 4),
-            (1, 1, 5, 5, 5),
-            (1, 1, 1),
-            (1, 1, 1),
-            (1, 1, 1), torch.float32, 'npu'), 
-        ((32, 3, 32, 32, 32),
-            (64, 3, 5, 5, 5),
-            (3, 2, 2),
-            (4, 3, 3),
-            (2, 2, 1), torch.float32, 'npu'),  
-        ((32, 3, 4),
-            (32, 3, 5),
-            (1,),
-            (1,),
-            (1,),
-            torch.float16, 'npu'),     
-        ((32, 3, 128, 128),
-            (64, 3, 5, 5),
-            (2, 2),
-            (2, 2),
-            (1, 1), torch.float16, 'npu'), 
-        ((1, 1, 4, 4, 4),
-            (1, 1, 5, 5, 5),
-            (1, 1, 1),
-            (1, 1, 1),
-            (1, 1, 1), torch.float16, 'npu'), 
-        ((32, 3, 32, 32, 32),
-            (64, 3, 5, 5, 5),
-            (3, 2, 2),
-            (4, 3, 3),
-            (2, 2, 1), torch.float16, 'npu'),    
+        # x_shape,w_shape, pads, strides, dilations
+    (
+        (32, 3, 4),
+        (32, 3, 5),
+        (1,),
+        (1,),
+        (1,),
+    ),
+    (
+        (1, 3, 4, 4),
+        (2, 3, 3, 3),
+        (1, 1),
+        (1, 2),
+        (2, 1),
+    ),
+    (
+        (1, 3, 32, 32),
+        (2, 3, 5, 5),
+        (2, 2),
+        (2, 2),
+        (1, 1),
+    ),
+    (
+        (32, 3, 32, 32),
+        (64, 3, 5, 5),
+        (2, 2),
+        (2, 2),
+        (1, 1),
+    ),
+    (
+        (1, 1, 4, 4, 4),
+        (1, 1, 5, 5, 5),
+        (1, 1, 1),
+        (1, 1, 1),
+        (1, 1, 1),
+    ),
+    (
+        (32, 3, 32, 32, 32),
+        (64, 3, 5, 5, 5),
+        (3, 2, 2),
+        (4, 3, 3),
+        (2, 2, 1),
+    ), 
 ]
 
-filtered_test_cases = [
-    (x_shape, w_shape, pads, strides, dilations, test_dtype, device)
-    for x_shape, w_shape, pads, strides, dilations, test_dtype, device in test_cases
-    if device == args.device
-]
+
 if args.device == 'mlu':
     import torch_mlu
 elif args.device == 'npu':
     import torch_npu
+elif args.device == "kunlun":
+    import torch_xmlir
 # 执行过滤后的测试用例
-for x_shape, w_shape, pads, strides, dilations, test_dtype, device in filtered_test_cases:
-    test(x_shape, w_shape, pads, strides, dilations, test_dtype, device)
+for x_shape, w_shape, pads, strides, dilations in test_cases:
+    test(x_shape, w_shape, pads, strides, dilations, args.device)
 

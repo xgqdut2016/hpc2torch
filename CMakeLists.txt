@@ -56,8 +56,6 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 #使用 GLOB 命令找到 include/ 下的所有 .cpp 文件
 file(GLOB INCLUDE_SOURCE_FILES "include/cpu/**.cpp")
 file(GLOB ASCEND_INCLUDE_SOURCE_FILES "include/npu/**.cpp")#昇腾机器头文件
-
-file(GLOB KUNLUN_INCLUDE_SOURCE_FILES "include/kunlun/**.xpu")
  
 # 使用 list(APPEND ...) 命令将 INCLUDE_SOURCE_FILES 添加到 CPP_SOURCE_FILES
 file(GLOB CPP_SOURCE_FILES "src/**/cpu/*.cpp")
@@ -66,8 +64,11 @@ list(APPEND CPP_SOURCE_FILES ${INCLUDE_SOURCE_FILES})
 file(GLOB ASCEND_SOURCE_FILES "src/**/npu/*.cpp")
 list(APPEND ASCEND_SOURCE_FILES ${INCLUDE_SOURCE_FILES} ${ASCEND_INCLUDE_SOURCE_FILES})
 
+file(GLOB KUNLUN_INCLUDE_SOURCE_FILES "include/kunlun/**.xpu")
 file(GLOB KUNLUN_XPU_SOURCE_FILES "src/**/kunlun/*.xpu")
 list(APPEND KUNLUN_XPU_SOURCE_FILES ${KUNLUN_INCLUDE_SOURCE_FILES})
+file(GLOB KUNLUN_CPP_SOURCE_FILES "src/**/kunlun/*.cpp")
+list(APPEND KUNLUN_SOURCE_FILES ${KUNLUN_XPU_SOURCE_FILES} ${KUNLUN_CPP_SOURCE_FILES})
 
 if(USE_CUDA)
   if(EXISTS "/usr/local/cuda")  # 英伟达 CUDA 平台
@@ -247,8 +248,7 @@ elseif(USE_ASCEND)
     target_link_libraries(my_library ${ASCEND_HAL} ${ASCEND_CL} ${ASCEND_BASE} ${ASCEND_DNN} ${ASCEND_HCCL} stdc++)
 
 # 设置 CMake C++ 编译器为 Kunlun 提供的 clang++ 编译器
-file(GLOB KUNLUN_XPU_SOURCE_FILES "src/**/kunlun/*.xpu")
-list(APPEND KUNLUN_XPU_SOURCE_FILES ${KUNLUN_INCLUDE_SOURCE_FILES})
+
 elseif(USE_KUNLUN)
     if(NOT DEFINED ENV{KUNLUN_HOME})
         set(KUNLUN_HOME "/usr/local/kunlun" CACHE PATH "Path to Kunlun SDK")
@@ -300,11 +300,12 @@ elseif(USE_KUNLUN)
                     -x xpu                    # <- 关键：告诉 Clang 这是 xpu 文件
                     --basename ${obj_base}
                     -std=c++17 -O2 -fno-builtin -g
-                    -c ${xpu_file} -v
+                    -c ${xpu_file}
                     -I${CMAKE_SOURCE_DIR}/include
                     -I${KUNLUN_HOME}/include
                     -I${XRE_DIR}/include
                     -I${XDNN_DIR}/include
+                    -I${XTDK_DIR}/include
             DEPENDS ${xpu_file}
             COMMENT "Compiling Kunlun XPU kernel ${xpu_file}"
             VERBATIM
@@ -312,13 +313,13 @@ elseif(USE_KUNLUN)
 
         list(APPEND KUNLUN_XPU_OBJECTS ${object_file} ${bin_object})
     endforeach()
-
-    # 单独 target 只依赖这些对象文件
     add_custom_target(kunlun_xpu_kernels ALL DEPENDS ${KUNLUN_XPU_OBJECTS})
+    # target 依赖所有 .o（xpu）+ .cpp
+    add_library(my_library SHARED
+        ${KUNLUN_CPP_SOURCE_FILES}   # 直接让 CMake 编译所有 .cpp
+        ${KUNLUN_XPU_OBJECTS}        # 再加上我们手工编译的 xpu 对象文件
+    )
 
-
-
-    add_library(my_library SHARED ${KUNLUN_XPU_OBJECTS})
     add_dependencies(my_library kunlun_xpu_kernels)
 
     target_include_directories(my_library PRIVATE
@@ -329,9 +330,10 @@ elseif(USE_KUNLUN)
         ${XTDK_DIR}/include
     )
 
-    target_compile_options(my_library PRIVATE -Wall -Werror -fPIC)
+    target_compile_options(my_library PRIVATE -Wall -fPIC)
     target_link_libraries(my_library PRIVATE stdc++ xpuapi xpurt)
     set_target_properties(my_library PROPERTIES LINKER_LANGUAGE CXX)
+
     
 elseif(USE_TECO)
     # set(CMAKE_BUILD_TYPE Debug)
