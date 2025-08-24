@@ -42,11 +42,14 @@ void softmaxCudnn(void const *input, void *output, int *shape, int ndim)
     softmaxCudnnDevice<T>(handle, input, output, shape, ndim);
     cudnnDestroy(handle);
 }
-extern "C" void softmax_cudnn_f32(void const *input, void *output, int *shape, int ndim)
+extern "C" void softmax_cudnn(void const *input, void *output, int *shape, int ndim, int byteSize)
 {
-    softmaxCudnn<float>(input, output, shape, ndim);
-}
-extern "C" void softmax_cudnn_f16(void const *input, void *output, int *shape, int ndim)
-{
-    softmaxCudnn<uint16_t>(input, output, shape, ndim);
+    if (byteSize == 4)
+    {
+        softmaxCudnn<float>(input, output, shape, ndim);
+    }
+    else if (byteSize == 2)
+    {
+        softmaxCudnn<uint16_t>(input, output, shape, ndim);
+    }
 }
