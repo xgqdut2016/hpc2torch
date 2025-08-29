@@ -6,12 +6,105 @@
 #include <xpu/runtime.h>
 #include "kunlun_type.h"
 // #include <xpu/kernel/xtdk_bf16.h>
+#include <xpu/kernel/xtdk_atomic_sm_xpu3.h>
+#include <math.h>
 #include "xpu/kernel/xtdk.h"
 #include "xpu/kernel/xtdk_io.h"
 #include "xpu/kernel/xtdk_math.h"
 #include "xpu/kernel/xtdk_simd.h"
 #include <stdio.h>
 #include <utility>
+
+#define SM_SIZE 10240
+
+template <typename T>
+__device__ inline T loadsm(__shared_ptr__ const T *p)
+{
+    T v;
+    if constexpr (std::is_same<T, half>::value)
+    {
+        __builtin_memcpy(&v, p, sizeof(T));
+    }
+    // else if constexpr (std::is_same<T, bfloat16_t>::value)
+    // {
+    //     __builtin_memcpy(&v, p, sizeof(T));
+    // }
+    else
+    {
+        v = *p;
+    }
+    return v;
+}
+// Load len data from shared memory
+template <typename T>
+__device__ inline void loadsm(__shared_ptr__ const T *p, T *v, int len)
+{
+    __builtin_memcpy(v, p, len * sizeof(T));
+}
+
+/**
+ * @brief Convert data type. All data is in local memory
+ * @param v: input value
+ * @return output value
+ */
+template <typename Tout, typename Tin>
+__device__ inline Tout to(Tin v)
+{
+    if constexpr (std::is_same<Tin, half>::value)
+    {
+        return __half2float(v);
+    }
+    // else if constexpr (std::is_same<Tin, bfloat16_t>::value)
+    // {
+    //     return __bfloat162float(v);
+    // }
+    else
+    {
+        return static_cast<Tout>(v);
+    }
+}
+
+/**
+ * @brief atomicAdd for kunlun xpu
+ * @param ptr: pointer to shared memory
+ * @param value: value to add
+ */
+template <typename T>
+inline __device__ T atomicAdd(__shared_ptr__ T *ptr, T value)
+{
+    T x = atomicadd(ptr, value);
+    return x;
+}
+// Specialize atomicAdd for half
+template <>
+inline __device__ half atomicAdd<half>(__shared_ptr__ half *ptr, half value)
+{
+    ticket_lock_mix();
+    __half old = loadsm(ptr);
+    float of = __half2float(old);
+    float vf = __half2float(value);
+    float sumf = of + vf;
+    half sum = __float2half_rn(sumf);
+    *ptr = sum;
+    mfence_sm();
+    ticket_unlock_mix();
+    return old;
+}
+// Specialize atomicAdd for bfloat16_t
+// template <>
+// inline __device__ bfloat16_t atomicAdd<bfloat16_t>(__shared_ptr__ bfloat16_t *ptr, bfloat16_t value)
+// {
+//     ticket_lock_mix();
+//     bfloat16_t old = loadsm(ptr);
+//     float of = __bfloat162float(old);
+//     float vf = __bfloat162float(value);
+//     float sumf = of + vf;
+//     bfloat16_t sum = __float2bfloat16_rn(sumf);
+//     *ptr = sum;
+//     mfence_sm();
+//     ticket_unlock_mix();
+//     return old;
+// }
 
 inline __device__ kunlun_ptrdiff_t indexToReducedOffset(
     kunlun_ptrdiff_t flat_index,

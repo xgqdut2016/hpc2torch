@@ -12,54 +12,49 @@ import os
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/lib/libmy_library.so')
 lib = ctypes.CDLL(lib_path)
 
-def random_sample(data, random_val, topp, topk, voc, temperature, torch_device):
-    indices = torch.zeros([topk], dtype = torch.int64)
-    dataNp = data.clone()
-                
-    sorted_indices = torch.argsort(dataNp, descending=True)
-    indices = sorted_indices[:topk] 
-    
-    dataNp = dataNp[sorted_indices]
-    
-    globalM = dataNp[0]
-    dataNp = (dataNp - globalM) / temperature
-    dataNp = torch.softmax(dataNp.float(), dim = 0)
-    
-    for i in range(1, topk):
-        dataNp[i] = dataNp[i] + dataNp[i - 1]
-    
-    for end in range(topk):
-        if(dataNp[end] >= topp):
-            break
-    if(end < topk - 1):
-        end += 1
-    else:
-        end = topk
-    
-    random_val *= dataNp[end - 1]
-    
-    for i in range(end):
-        if(random_val < dataNp[i]):
-            return indices[i]
+def random_sample_torch(data, random_val, topp, topk, voc, temperature):
+    if topp > 0 and topk > 1:
+        sorted_vals, sorted_indices = torch.sort(data, descending=True)
+        scaled_vals = (sorted_vals - sorted_vals[0]) / temperature
+        try:
+            probs = torch.softmax(scaled_vals, dim=0)
+        except RuntimeError as e:
+            if "not implemented for 'Half'" in str(e):
+                scaled_vals = scaled_vals.to(torch.float32)
+                probs = torch.softmax(scaled_vals, dim=0)
+            else:
+                raise
+        cum_probs = torch.cumsum(probs, dim=0)
 
-def random_sample_0(data):
+        k_index = min(topk, voc) - 1
+        threshold = min(cum_probs[k_index], topp) * random_val
+
+        try:
+            idx = torch.searchsorted(cum_probs, threshold)
+        except Exception:
+            # Fallback for manual search if torch.searchsorted is not supported
+            indices = (cum_probs >= threshold).nonzero(as_tuple=True)[0]
+            idx = (
+                indices[0]
+                if indices.numel() > 0
+                else torch.tensor(len(cum_probs) - 1, device=cum_probs.device)
+            )
+        return sorted_indices[idx]
+
     return torch.argmax(data)
-def random_sample_torch(data, random_val, topp, topk, voc, temperature, torch_device):
-    if(topp > 0 and topk > 1):
-        ans = random_sample(data, random_val, topp, topk, voc, temperature, torch_device)
-    else:
-        ans = random_sample_0(data)
-    return ans
 
-def test(torch_device, voc, random_val, topp, topk, temperature):
-    byteSize = 2
+def test(device, voc, random_val, topp, topk, temperature):
+    byteSize = 4
     x_dtype = torch.float16
     if byteSize == 4:
         x_dtype = torch.float32
     print(
-        f"Testing RandomSample on {torch_device} with voc:{voc} , topk:{topk}, topp:{topp}, dtype:{x_dtype}"
+        f"Testing RandomSample on {device} with voc:{voc} , topk:{topk}, topp:{topp}, random_val:{random_val}, temperature:{temperature}, dtype:{x_dtype}"
     )
-    
+    if device == "kunlun":
+        torch_device = "cuda"
+    else:
+        torch_device = device
     data = torch.arange(voc).float() * 0.0001
     
     _perm = torch.randperm(voc)
@@ -69,17 +64,19 @@ def test(torch_device, voc, random_val, topp, topk, temperature):
     if(torch_device == 'mlu' or torch_device == 'npu'):
         
         indices = torch.zeros([1], dtype = torch.int64, device = torch_device)
+    elif device == "kunlun":
+        indices = torch.zeros([1], dtype = torch.int32, device = torch_device)
     else:
         
         indices = torch.zeros([1], dtype = torch.uint64, device = torch_device)
     
-    ans = random_sample_torch(data, random_val, topp, topk, voc, temperature, torch_device)
+    ans = random_sample_torch(data, random_val, topp, topk, voc, temperature)
     
     probs_ptr = ctypes.cast(data.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     result_ptr = ctypes.cast(indices.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     
-    if torch_device == "sdaa":
-        torch_randomSample_time = performance.TecoProfile((random_sample_torch, (data.to("cpu"), random_val, topp, topk, voc, temperature, "cpu")))
+    if device == "sdaa":
+        torch_randomSample_time = performance.TecoProfile((random_sample_torch, (data, random_val, topp, topk, voc, temperature)))
         lib.randomSample_teco.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -98,16 +95,36 @@ def test(torch_device, voc, random_val, topp, topk, temperature):
                                 voc,
                                 topk,
                                 temperature, byteSize)))
-        
+    elif device == "kunlun":
+        torch_randomSample_time = performance.KunlunProfile((random_sample_torch, (data, random_val, topp, topk, voc, temperature)))
+        lib.randomSample_kunlun.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_float,
+            ctypes.c_float,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_float,
+            ctypes.c_int
+        ]
+        custom_randomSample_time = \
+        performance.KunlunProfile((lib.randomSample_kunlun, (result_ptr, 
+                                probs_ptr, 
+                                random_val,
+                                topp,
+                                voc,
+                                topk,
+                                temperature, byteSize)))
     performance.logBenchmark(torch_randomSample_time, custom_randomSample_time)
     
     ans = ans.to("cpu")
     index = indices[0].to("cpu").to(ans.dtype)
+    print(ans, index)
     assert index == ans or data[ans] == data[index]
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="Test randomSample on different devices.")
-parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', "sdaa"], required=True, help="Device to run the tests on.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', "sdaa", "kunlun"], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 
 test_cases = [
@@ -128,6 +145,8 @@ if args.device == 'mlu':
     import torch_mlu
 if args.device == 'sdaa':
     import torch_sdaa
+if args.device == 'kunlun':
+    import torch_xmlir
 # 执行过滤后的测试用例
 for voc, random_val, topp, topk, temperature in test_cases:
     test(args.device, voc, random_val, topp, topk, temperature)
