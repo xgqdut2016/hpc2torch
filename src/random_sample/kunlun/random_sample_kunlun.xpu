@@ -84,7 +84,76 @@ __device__ void findTopk_local(
         }
     }
 }
+template <typename Tval, typename Tidx>
+__device__ void findTopOne(
+    __global_ptr__ Tval *values,
+    __global_ptr__ Tidx *indices,
+    int size) {
+    __local__ Tval values_a = -INFINITY;
+    __local__ Tval values_b;
+    __local__ Tidx indices_a = 0;
+    __local__ Tidx indices_b;
+    for (int j = 0; j < size; ++j) {
+        GM2LM(values + j, &values_b, sizeof(Tval));
+        GM2LM(indices + j, &indices_b, sizeof(Tidx));
+        if constexpr(std::is_same_v<Tval, float>){
+            if (values_a < values_b) {
+                values_a = values_b;
+                indices_a = indices_b;
+            }
+        }
+        else if constexpr(std::is_same_v<Tval, half>){
+            if (__half2float(values_a) < __half2float(values_b)) {
+                values_a = values_b;
+                indices_a = indices_b;
+            }
+        }
+        /***
+        else if constexpr(std::is_same_v<Tval, bfloat16_t>){
+            if (__bfloat162float(values_a) < __bfloat162float(values_b)) {
+                values_a = values_b;
+                indices_a = indices_b;
+            }
+        }
+        ***/
+        LM2GM(&values_a, values, sizeof(Tval)); //把最大值存储在0号位置
+        LM2GM(&indices_a, indices, sizeof(Tidx));
+        
+    }
+}
 
+template <typename Tval, typename Tidx>
+__device__ void findTopOne_local(
+    __local__ Tval *values,
+    __local__ Tidx *result,
+    int size) {
+    __local__ Tval values_a = -INFINITY;
+    __local__ Tidx indices_a = 0;
+    for (int j = 0; j < size; ++j) {
+        if constexpr(std::is_same_v<Tval, float>){
+            if (values_a < values[j]) {
+                values_a = values[j];
+                indices_a = result[j];
+            }
+        }
+        else if constexpr(std::is_same_v<Tval, half>){
+            if (__half2float(values_a) < __half2float(values[j])) {
+                values_a = values[j];
+                indices_a = result[j];
+            }
+        }
+        /***
+        else if constexpr(std::is_same_v<Tval, bfloat16_t>){
+            if (__bfloat162float(values_a) < __bfloat162float(values[j])) {
+                values_a = values[j];
+                indices_a = result[j];
+            }
+        }
+        ***/
+    }
+    values[0] = values_a;
+    result[0] = indices_a;
+}
 template <unsigned int BLOCK_SIZE, typename Tval, typename Tcompute, typename Tidx>
 __global__ void random_sampleKernel(Tidx *result,
                                     const Tval *probs,
@@ -318,7 +387,69 @@ __global__ void random_sampleKernel(Tidx *result,
     }
 
 }
+template <typename Tval, typename Tidx>
+__global__ void argmaxKernel(Tidx *result, const Tval *probs, int voc, 
+                                    Tidx *indices,
+                                    Tval *values,
+                                    Tidx *indices_global,
+                                    Tval *values_global){
+    int cid = core_id();
+    if (cid >= core_num()) {
+        return;
+    }
+    int thread_id = core_num() * cluster_id() + cid;
+    int nthreads = core_num() * cluster_num();
 
+    // 每个coreId分配step个元素
+    int remain = voc % nthreads;
+    int step_easy = (voc - remain) / nthreads;
+    int step_hard = step_easy + 1;
+    int step = (thread_id < remain ? step_hard : step_easy);
+    int ind_start = (thread_id < remain ? thread_id * step_hard : remain * step_hard + (thread_id - remain) * step_easy);
+    for (int index = ind_start; index < ind_start + step; index++) {
+        indices[index] = index;
+    }
+
+    constexpr int buf_size = 128;
+    __local__ Tval values_local[2 * buf_size];
+    __local__ Tidx indices_local[2 * buf_size];
+    for (int i = 0; i < 2 * buf_size; i++) {
+        values_local[i] = -INFINITY;
+        indices_local[i] = 0;
+    }
+
+    int remainTask = step % buf_size;
+    int repeat = (step - remainTask) / buf_size;
+    if (buf_size > step_easy) { // buf_size >= step_hard > step_easy
+        GM2LM(values + ind_start, values_local, step * sizeof(Tval));
+        GM2LM(indices + ind_start, indices_local, step * sizeof(Tidx));
+        findTopOne_local(values_local, indices_local, step);
+        LM2GM(values_local, values_global + thread_id, sizeof(Tval)); 
+        LM2GM(indices_local, indices_global + thread_id, sizeof(Tidx));
+    } else {                   // buf_size <= step_easy
+        for (int r = 0; r < repeat; r++) {
+            GM2LM(values + ind_start + r * buf_size, values_local, buf_size * sizeof(Tval));
+            GM2LM(indices + ind_start + r * buf_size, indices_local, buf_size * sizeof(Tidx));
+            findTopOne_local(values_local, indices_local, buf_size + 1); 
+            values_local[buf_size] = values_local[0];
+            indices_local[buf_size] = indices_local[0];
+        }
+        if (remainTask) {
+            GM2LM(values + ind_start + repeat * buf_size, values_local, remainTask * sizeof(Tval));
+            GM2LM(indices + ind_start + repeat * buf_size, indices_local, remainTask * sizeof(Tidx));
+            //此时repeat一定大于0
+            values_local[remainTask] = values_local[buf_size];
+            indices_local[remainTask] = indices_local[buf_size];
+            findTopOne_local(values_local, indices_local, remainTask + 1);
+        }
+        LM2GM(values_local, values_global + thread_id, sizeof(Tval));
+        LM2GM(indices_local, indices_global + thread_id, sizeof(Tidx));
+    }
+    if (thread_id == 0) {
+        findTopOne(values_global, indices_global, nthreads); 
+        result[0] = indices_global[0];    
+    }
+}
 template <typename Tval, typename Tidx>
 void randomSampleKunlunDevice(void *result,
                   const void *probs,
@@ -333,22 +464,22 @@ void randomSampleKunlunDevice(void *result,
     
     int topk_ = topk <= voc ? topk : voc;
     bool dosample = topk_ > 1 && temperature != 0.0f && topp != 0.0f && random_val != 0.0f;
-    int cluster_num = 256;
-    int core_num = 64;
+    constexpr unsigned int cluster_num = 8;
+    constexpr unsigned int core_num = 64;
     size_t workspace_size = (voc + cluster_num * core_num * topk_ + cluster_num) * sizeof(Tval) + (voc + cluster_num * core_num * topk_) * sizeof(Tidx);
     char *workspace_value;
     xpu_malloc((void **)(&workspace_value), workspace_size);
+    
+    Tval *values = (Tval *)workspace_value;// [voc]
+    xpu_memcpy(values, probs, voc * sizeof(Tval), XPU_DEVICE_TO_DEVICE);
+    Tval *values_global = values + voc;//[cluster_num * core_num * topk_]
+    Tval *sum_global = values_global + cluster_num * core_num * topk_;//[cluster_num]
+    char *workspace_index = workspace_value + (voc + cluster_num * core_num * topk_ + cluster_num) * sizeof(Tval);
+    Tidx *indices = (Tidx *)workspace_index;//[voc]
+    Tidx *indices_global = indices + voc;//[cluster_num * core_num * topk_]
     if (dosample)
     {
-        constexpr unsigned int cluster_num = 8;
-        constexpr unsigned int core_num = 64;
-        Tval *values = (Tval *)workspace_value;// [voc]
-        xpu_memcpy(values, probs, voc * sizeof(Tval), XPU_DEVICE_TO_DEVICE);
-        Tval *values_global = values + voc;//[cluster_num * core_num * topk_]
-        Tval *sum_global = values_global + cluster_num * core_num * topk_;//[cluster_num]
-        char *workspace_index = workspace_value + (voc + cluster_num * core_num * topk_ + cluster_num) * sizeof(Tval);
-        Tidx *indices = (Tidx *)workspace_index;//[voc]
-        Tidx *indices_global = indices + voc;//[cluster_num * core_num * topk_]
+        
         random_sampleKernel<core_num, Tval, Tval, Tidx><<<cluster_num, core_num, stream>>>((Tidx *)result,
                                                                                                (Tval *)probs,
                                                                                                random_val,
@@ -364,7 +495,14 @@ void randomSampleKunlunDevice(void *result,
         xpu_wait(stream);                                                                                        
         
     }
-    
+    else{
+        argmaxKernel<Tval, Tidx><<<cluster_num, core_num, stream>>>((Tidx *)result, (Tval *)probs, voc, 
+                                    indices,
+                                    values,
+                                    indices_global,
+                                    values_global);
+        xpu_wait(stream);                            
+    }    
 }
 
 template <typename Tval, typename Tidx>
