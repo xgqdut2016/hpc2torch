@@ -15,7 +15,20 @@ __device__ inline Tcompute sumSquared(__shared_ptr__ const Tdata *data_ptr, size
     __shared__ Tcompute temp_storage;
     if (core_id() == 0)
     {
-        temp_storage = 0;
+        if constexpr (std::is_same_v<Tcompute, half>)
+        {
+            temp_storage = __float2half(0.0f);
+        }
+        /***
+        else if constexpr (std::is_same_v<Tcompute, bfloat16_t>)
+        {
+            temp_storage = __float2bfloat16(0.0f);
+        }
+        ***/
+        else if constexpr (std::is_same_v<Tcompute, float>)
+        {
+            temp_storage = 0.0f;
+        }
     }
     sync_cluster();
 
@@ -40,7 +53,20 @@ __device__ inline Tcompute sum(__shared_ptr__ const Tdata *data_ptr, size_t coun
     __shared__ Tcompute temp_storage;
     if (core_id() == 0)
     {
-        temp_storage = 0;
+        if constexpr (std::is_same_v<Tcompute, half>)
+        {
+            temp_storage = __float2half(0.0f);
+        }
+        /***
+        else if constexpr (std::is_same_v<Tcompute, bfloat16_t>)
+        {
+            temp_storage = __float2bfloat16(0.0f);
+        }
+        ***/
+        else if constexpr (std::is_same_v<Tcompute, float>)
+        {
+            temp_storage = 0.0f;
+        }
     }
     sync_cluster();
 

@@ -44,7 +44,7 @@ def random_sample_torch(data, random_val, topp, topk, voc, temperature):
     return torch.argmax(data)
 
 def test(device, voc, random_val, topp, topk, temperature):
-    byteSize = 4
+    byteSize = 2
     x_dtype = torch.float16
     if byteSize == 4:
         x_dtype = torch.float32
