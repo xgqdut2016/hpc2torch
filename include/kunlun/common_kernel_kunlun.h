@@ -18,25 +18,6 @@
 #define SM_SIZE 10240
 
 template <typename T>
-__device__ inline T loadsm(__shared_ptr__ const T *p)
-{
-    T v;
-    if constexpr (std::is_same<T, half>::value)
-    {
-        __builtin_memcpy(&v, p, sizeof(T));
-    }
-    // else if constexpr (std::is_same<T, bfloat16_t>::value)
-    // {
-    //     __builtin_memcpy(&v, p, sizeof(T));
-    // }
-    else
-    {
-        v = *p;
-    }
-    return v;
-}
-// Load len data from shared memory
-template <typename T>
 __device__ inline void loadsm(__shared_ptr__ const T *p, T *v, int len)
 {
     __builtin_memcpy(v, p, len * sizeof(T));
@@ -80,7 +61,7 @@ template <>
 inline __device__ half atomicAdd<half>(__shared_ptr__ half *ptr, half value)
 {
     ticket_lock_mix();
-    __half old = loadsm(ptr);
+    half old = *ptr;
     float of = __half2float(old);
     float vf = __half2float(value);
     float sumf = of + vf;
@@ -95,7 +76,7 @@ inline __device__ half atomicAdd<half>(__shared_ptr__ half *ptr, half value)
 // inline __device__ bfloat16_t atomicAdd<bfloat16_t>(__shared_ptr__ bfloat16_t *ptr, bfloat16_t value)
 // {
 //     ticket_lock_mix();
-//     bfloat16_t old = loadsm(ptr);
+//     bfloat16_t old = *ptr;
 //     float of = __bfloat162float(old);
 //     float vf = __bfloat162float(value);
 //     float sumf = of + vf;
@@ -105,6 +86,33 @@ inline __device__ half atomicAdd<half>(__shared_ptr__ half *ptr, half value)
 //     ticket_unlock_mix();
 //     return old;
 // }
+
+/**
+ * @brief atomicMax for kunlun xpu
+ * @param ptr: pointer to shared memory
+ * @param value: value to compare
+ */
+template <typename T>
+inline __device__ T atomicMax(__shared_ptr__ T *ptr, T value)
+{
+    ticket_lock_mix();
+    T old = *ptr;
+    if constexpr (std::is_same<T, half>::value || std::is_same<T, float>::value)
+    {
+        *ptr = fmax(old, value);
+    }
+    // else if constexpr (std::is_same<T, bfloat16_t>::value)
+    // {
+    //     float of = __bfloat162float(old);
+    //     float vf = __bfloat162float(value);
+    //     float maxf = fmax(of, vf);
+    //     bfloat16_t max = __float2bfloat16_rn(maxf);
+    //     *ptr = max;
+    // }
+    mfence_sm();
+    ticket_unlock_mix();
+    return old;
+}
 
 inline __device__ kunlun_ptrdiff_t indexToReducedOffset(
     kunlun_ptrdiff_t flat_index,
