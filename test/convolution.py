@@ -108,7 +108,7 @@ def test(x_shape, w_shape, pads, strides, dilations, torch_device):
         ]           
         custom_convolution_time = \
         performance.BangProfile((lib.convolution_cnnl, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim, byteSize)))
-    if torch_device == "npu":
+    elif torch_device == "npu":
         
         torch_convolution_time = performance.AscendProfile((conv, (x, w, strides, pads, dilations))) 
         lib.convolution_aclnn.argtypes = [
@@ -127,7 +127,7 @@ def test(x_shape, w_shape, pads, strides, dilations, torch_device):
         
         custom_convolution_time = \
         performance.AscendProfile((lib.convolution_aclnn, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim, byteSize)))
-    if torch_device == "kunlun":
+    elif torch_device == "kunlun":
         torch_convolution_time = performance.KunlunProfile((conv, (x, w, strides, pads, dilations))) 
         lib.convolution_xdnn.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
@@ -144,7 +144,23 @@ def test(x_shape, w_shape, pads, strides, dilations, torch_device):
         ]           
         custom_convolution_time = \
         performance.KunlunProfile((lib.convolution_xdnn, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim, byteSize)))
-            
+    elif torch_device == "cuda":
+        torch_convolution_time = performance.CudaProfile((conv, (x, w, strides, pads, dilations))) 
+        lib.convolution_cudnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),#pads
+            ctypes.POINTER(ctypes.c_int),#strides
+            ctypes.POINTER(ctypes.c_int),#dilations
+            ctypes.POINTER(ctypes.c_int),#x_shape
+            ctypes.POINTER(ctypes.c_int),#w_shape
+            ctypes.POINTER(ctypes.c_int),#y_shape
+            ctypes.c_int,
+            ctypes.c_int
+        ]           
+        custom_convolution_time = \
+        performance.CudaProfile((lib.convolution_cudnn, (x_ptr, w_ptr, y_ptr, pData, sData, dData, xShape, wShape, yShape, ndim, byteSize)))       
     performance.logBenchmark(torch_convolution_time, custom_convolution_time)
     
 
