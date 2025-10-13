@@ -271,7 +271,261 @@ __global__ void _warpSoftmaxKernel(T const *input, T *output,
         }
     }
 }
+template <int BLOCK_DIM>
+__global__ void _blockSoftmaxKernel_stride1(float *__restrict input,
+                                            float *__restrict output, int size,
+                                            int dimsize)
+{
+
+    int tid = blockIdx.x * dimsize;
+
+    float dataPerThread[4];
+
+    DataMaxSum dms_partial;
+    dms_partial.max_tmp = -__FLT_MAX__;
+    dms_partial.sum_tmp = 0.0f;
+    DataMaxSum dms_input;
+    int remain = dimsize % (4 * BLOCK_DIM);
+    int remain_step = remain % 4;
+    int step = (remain - remain_step) / 4;
+    int repeat = (dimsize - remain) / (4 * BLOCK_DIM);
+    if (threadIdx.x < step)
+    {
+        (float4 &)dataPerThread[0] =
+            (float4 &)input[tid + repeat * 4 * BLOCK_DIM + threadIdx.x * 4];
+        for (int i = 0; i < 4; i++)
+        {
+            dms_input.max_tmp = dataPerThread[i];
+            dms_input.sum_tmp = 1.0f;
+            dms_partial =
+                reduce_dms_op(dms_partial,
+                              dms_input); // reduce the data to one block
+        }
+    }
+    if (threadIdx.x < remain_step)
+    {
+        dms_input.max_tmp =
+            input[tid + repeat * 4 * BLOCK_DIM + step * 4 + threadIdx.x];
+        dms_input.sum_tmp = 1.0f;
+        dms_partial = reduce_dms_op(dms_partial,
+                                    dms_input); // reduce the data to one block
+    }
+
+    for (int r = 0; r < repeat; r++)
+    {
+        (float4 &)dataPerThread[0] =
+            (float4 &)input[tid + r * 4 * BLOCK_DIM + threadIdx.x * 4];
+        for (int i = 0; i < 4; i++)
+        {
+            dms_input.max_tmp = dataPerThread[i];
+            dms_input.sum_tmp = 1.0f;
+            dms_partial =
+                reduce_dms_op(dms_partial,
+                              dms_input); // reduce the data to one block
+        }
+    }
+
+    typedef cub::BlockReduce<DataMaxSum, BLOCK_DIM> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
+    __shared__ DataMaxSum dms_total;
+    DataMaxSum dms_block =
+        BlockReduce(temp_storage).Reduce(dms_partial, reduce_dms_op);
+    if (threadIdx.x ==
+        0)
+    { // must set threadIdx.x = 0 write the output to memory
+        dms_total = dms_block;
+    }
+    __syncthreads();
+    //-----------------
+    float inv = __fdividef(1.0F, dms_total.sum_tmp);
+    for (int r = 0; r < repeat; r++)
+    {
+        (float4 &)dataPerThread[0] =
+            (float4 &)input[tid + r * 4 * BLOCK_DIM + threadIdx.x * 4];
+        for (int i = 0; i < 4; i++)
+        {
+            dataPerThread[i] =
+                __expf(dataPerThread[i] - dms_total.max_tmp) * inv;
+        }
+        (float4 &)output[tid + r * 4 * BLOCK_DIM + threadIdx.x * 4] =
+            (float4 &)dataPerThread[0];
+    }
+    if (threadIdx.x < step)
+    {
+        (float4 &)dataPerThread[0] =
+            (float4 &)input[tid + repeat * 4 * BLOCK_DIM + threadIdx.x * 4];
+        for (int i = 0; i < 4; i++)
+        {
+            dataPerThread[i] =
+                __expf(dataPerThread[i] - dms_total.max_tmp) * inv;
+        }
+        (float4 &)output[tid + repeat * 4 * BLOCK_DIM + threadIdx.x * 4] =
+            (float4 &)dataPerThread[0];
+    }
+    if (threadIdx.x < remain_step)
+    {
+        output[tid + repeat * 4 * BLOCK_DIM + step * 4 + threadIdx.x] =
+            __expf(
+                input[tid + repeat * 4 * BLOCK_DIM + step * 4 + threadIdx.x] -
+                dms_total.max_tmp) *
+            inv;
+    }
+}
+template <int BLOCK_DIM_x, int BLOCK_DIM_y>
+__global__ void _warpSoftmaxKernel_stride1(float *__restrict input,
+                                           float *__restrict output, int size,
+                                           int dimsize)
+{
+    int otherIdx = blockIdx.x * blockDim.y + threadIdx.y;
+    int otherSize = size / dimsize;
+    int tid = otherIdx * dimsize;
+    float dataPerThreadx[4];
+    int remain = dimsize % (4 * BLOCK_DIM_x);
+    int remain_step = remain % 4;
+    int step = (remain - remain_step) / 4;
+    int repeat = (dimsize - remain) / (4 * BLOCK_DIM_x);
+
+    if (otherIdx < otherSize)
+    {
+        __shared__ float max_total[BLOCK_DIM_y];
+        __shared__ float sum_total[BLOCK_DIM_y];
+        float max_data = -__FLT_MAX__;
+        if (threadIdx.x < step)
+        {
+            (float4 &)dataPerThreadx[0] = (float4 &)
+                input[tid + repeat * 4 * BLOCK_DIM_x + threadIdx.x * 4];
+            for (int i = 0; i < 4; i++)
+            {
+                max_data = max(max_data, dataPerThreadx[i]);
+            }
+        }
+        if (threadIdx.x < remain_step)
+        {
+            max_data = max(
+                max_data,
+                input[tid + repeat * 4 * BLOCK_DIM_x + step * 4 + threadIdx.x]);
+        }
+        for (int r = 0; r < repeat; r++)
+        {
+            (float4 &)dataPerThreadx[0] =
+                (float4 &)input[tid + r * 4 * BLOCK_DIM_x + threadIdx.x * 4];
+            for (int i = 0; i < 4; i++)
+            {
+                max_data = max(max_data, dataPerThreadx[i]);
+            }
+        }
+
+        max_data = WarpAllReduce<MaxOp, float, BLOCK_DIM_x>(max_data);
+
+        if (threadIdx.x == 0)
+        {
+            max_total[threadIdx.y] = max_data;
+        }
+        __syncthreads();
+        //--------------------------------------------
+        float sum_data = 0.0f;
+        if (threadIdx.x < step)
+        {
+            (float4 &)dataPerThreadx[0] = (float4 &)
+                input[tid + repeat * 4 * BLOCK_DIM_x + threadIdx.x * 4];
+            for (int i = 0; i < 4; i++)
+            {
+                dataPerThreadx[i] =
+                    __expf(dataPerThreadx[i] - max_total[threadIdx.y]);
+                sum_data += dataPerThreadx[i];
+            }
+        }
+        if (threadIdx.x < remain_step)
+        {
+            sum_data += __expf(
+                input[tid + repeat * 4 * BLOCK_DIM_x + step * 4 + threadIdx.x] -
+                max_total[threadIdx.y]);
+        }
+        for (int r = 0; r < repeat; r++)
+        {
+            (float4 &)dataPerThreadx[0] =
+                (float4 &)input[tid + r * 4 * BLOCK_DIM_x + threadIdx.x * 4];
+            for (int i = 0; i < 4; i++)
+            {
+                dataPerThreadx[i] =
+                    __expf(dataPerThreadx[i] - max_total[threadIdx.y]);
+                sum_data += dataPerThreadx[i];
+            }
+        }
+
+        sum_data = WarpAllReduce<SumOp, float, BLOCK_DIM_x>(sum_data);
+
+        if (threadIdx.x == 0)
+        {
+            sum_total[threadIdx.y] = sum_data;
+        }
+        __syncthreads();
+        //--------------------------------------------
+        float inv = __fdividef(1.0F, sum_total[threadIdx.y]);
+        for (int r = 0; r < repeat; r++)
+        {
+            (float4 &)dataPerThreadx[0] =
+                (float4 &)input[tid + r * 4 * BLOCK_DIM_x + threadIdx.x * 4];
+            for (int i = 0; i < 4; i++)
+            {
+                dataPerThreadx[i] =
+                    __expf(dataPerThreadx[i] - max_total[threadIdx.y]) * inv;
+            }
+            (float4 &)output[tid + r * 4 * BLOCK_DIM_x + threadIdx.x * 4] =
+                (float4 &)dataPerThreadx[0];
+        }
+        if (threadIdx.x < step)
+        {
+            (float4 &)dataPerThreadx[0] = (float4 &)
+                input[tid + repeat * 4 * BLOCK_DIM_x + threadIdx.x * 4];
+            for (int i = 0; i < 4; i++)
+            {
+                dataPerThreadx[i] =
+                    __expf(dataPerThreadx[i] - max_total[threadIdx.y]) * inv;
+            }
+            (float4 &)output[tid + repeat * 4 * BLOCK_DIM_x + threadIdx.x * 4] =
+                (float4 &)dataPerThreadx[0];
+        }
+        if (threadIdx.x < remain_step)
+        {
+            output[tid + repeat * 4 * BLOCK_DIM_x + step * 4 + threadIdx.x] =
+                __expf(input[tid + repeat * 4 * BLOCK_DIM_x + step * 4 +
+                             threadIdx.x] -
+                       max_total[threadIdx.y]) *
+                inv;
+        }
+    }
+}
+
 //-----------------
+void softmax_stride1_kernel(int num_blocks, float *input, float *output,
+                            int size, int dimsize, int stride)
+{
+    if (dimsize > 1024)
+    {
+        int BLOCK_DIM = 1024;
+        _blockSoftmaxKernel_stride1<1024>
+            <<<num_blocks, BLOCK_DIM>>>(
+                input, output, size, dimsize);
+    }
+    else
+    {
+        // int BLOCK_DIM = 256;
+        // _blockSoftmaxKernel_stride1<256>
+        //     <<<num_blocks, BLOCK_DIM>>>(
+        //         input, output, size, dimsize);
+        int BLOCK_DIM_x = 32;
+        int BLOCK_DIM_y = 32;
+        int num_block_x = (num_blocks + BLOCK_DIM_y - 1) / BLOCK_DIM_y;
+        dim3 block_dim(BLOCK_DIM_x, BLOCK_DIM_y, 1);
+        dim3 grid_dim(num_block_x, 1, 1);
+
+        _warpSoftmaxKernel_stride1<32, 32>
+            <<<grid_dim, block_dim>>>(
+                input, output, size, dimsize);
+    }
+}
+
 template <typename T>
 void softmaxLaunch(void const *input, void *output, int size, int dimsize, int stride)
 {
@@ -365,11 +619,23 @@ void softmaxLaunch(void const *input, void *output, int size, int dimsize, int s
     }
     cudaDeviceSynchronize();
 }
-extern "C" void softmax_nv_f32(void const *input, void *output, int size, int dimsize, int stride)
+extern "C" void softmax_nv(void const *input, void *output, int size, int dimsize, int stride, int byteSize)
 {
-    softmaxLaunch<float>(input, output, size, dimsize, stride);
-}
-extern "C" void softmax_nv_f16(void const *input, void *output, int size, int dimsize, int stride)
-{
-    softmaxLaunch<half>(input, output, size, dimsize, stride);
+    if (byteSize == 4)
+    {
+        if (stride == 1 && dimsize % 4 == 0)
+        {
+            int num_blocks = size / dimsize;
+            softmax_stride1_kernel(num_blocks, (float *)input, (float *)output,
+                                   size, dimsize, stride);
+        }
+        else
+        {
+            softmaxLaunch<float>(input, output, size, dimsize, stride);
+        }
+    }
+    else if (byteSize == 2)
+    {
+        softmaxLaunch<half>(input, output, size, dimsize, stride);
+    }
 }
