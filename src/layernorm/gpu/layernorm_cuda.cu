@@ -155,11 +155,14 @@ void layernormLaunch(void const *input, void const *scale, void const *bias, voi
     }
     cudaDeviceSynchronize();
 }
-extern "C" void layernorm_nv_f32(void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize)
+extern "C" void layernorm_nv(void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize, int byteSize)
 {
-    layernormLaunch<float>(input, scale, bias, output, eps, size, behindsize);
-}
-extern "C" void layernorm_nv_f16(void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize)
-{
-    layernormLaunch<half>(input, scale, bias, output, eps, size, behindsize);
+    if (byteSize == 2)
+    {
+        layernormLaunch<half>(input, scale, bias, output, eps, size, behindsize);
+    }
+    if (byteSize == 4)
+    {
+        layernormLaunch<float>(input, scale, bias, output, eps, size, behindsize);
+    }
 }

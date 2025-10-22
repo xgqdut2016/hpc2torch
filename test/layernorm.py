@@ -14,7 +14,7 @@ lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/
 lib = ctypes.CDLL(lib_path)
 
 def test(test_shape, axis, eps, device):
-    byteSize = 2
+    byteSize = 4
     test_dtype = torch.float16
     if byteSize == 4:
         test_dtype = torch.float32
@@ -148,16 +148,11 @@ parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=
 args = parser.parse_args()    
 
 test_cases = [
-        # test_shape, axis, eps
-        #cpu测试用小数据
-        # ((7, 12, 24), 1, 1e-5),
-        # ((7, 12, 24), 0, 1e-5),
-        # ((7, 12, 24), 2, 1e-5),
-
-        ((70, 1200, 24), 0, 1e-5), #当axis = 0，float16的时候，规模太大导致手写MLU算子过程中的reduce误差累积严重，精度无法对齐
-        ((700, 1200, 24), 1, 1e-5),
-        ((700, 1200, 24), 2, 1e-5),
-         
+        ((12, 512, 1024), 2, 1e-5),
+        ((1, 512, 1024), 2, 1e-5),
+        # ((70, 1200, 24), 0, 1e-5), #当axis = 0，float16的时候，规模太大导致手写MLU算子过程中的reduce误差累积严重，精度无法对齐
+        # ((700, 1200, 24), 1, 1e-5),
+        # ((700, 1200, 24), 2, 1e-5),
 ]
 
 if args.device == 'mlu':

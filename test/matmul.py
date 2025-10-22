@@ -24,8 +24,8 @@ def matmul(_c, beta, _a, _b, alpha):
     )
     return ans
     
-def test_guochan(a_shape, b_shape, c_shape, alpha, beta, device):
-    byteSize = 2
+def test_diaoku(a_shape, b_shape, c_shape, alpha, beta, device):
+    byteSize = 4
     if (byteSize == 4):
         test_dtype = torch.float32
     
@@ -92,6 +92,25 @@ def test_guochan(a_shape, b_shape, c_shape, alpha, beta, device):
         custom_matmul_time = \
         performance.AscendProfile((lib.matmul_aclnn, 
         (A_ptr, B_ptr, C_ptr, aShape, bShape, cShape, aDim, bDim, cDim, alpha, beta, byteSize)))
+    elif device == "cuda":
+        torch_matmul_time = performance.CudaProfile((matmul, (C_clone, beta, A, B, alpha))) 
+        lib.matmul_cudnn.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_float,
+            ctypes.c_float,
+            ctypes.c_int
+        ]           
+        custom_matmul_time = \
+        performance.CudaProfile((lib.matmul_cudnn, 
+        (A_ptr, B_ptr, C_ptr, aShape, bShape, cShape, aDim, bDim, cDim, alpha, beta, byteSize)))
     performance.logBenchmark(torch_matmul_time, custom_matmul_time)
 
     for i in range(40): #对于alpha , beta > 0的情况，此时需要特别注意
@@ -135,20 +154,6 @@ def test_cuda(M, K, N, test_dtype):
             lib.matmul_cuda_f32,
             (A_ptr, B_ptr, C_ptr, M, K, N)
         ))
-        '''
-        lib.matmul_cudnn_f32.argtypes = [
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int
-        ]
-        custom_matmul_time = performance.CudaProfile((
-            lib.matmul_cudnn_f32,
-            (A_ptr, B_ptr, C_ptr, M, K, N)
-        ))
-        '''
         
         
     performance.logBenchmark(torch_matmul_time, custom_matmul_time)
@@ -167,32 +172,34 @@ parser = argparse.ArgumentParser(description="Test matmul on different devices."
 parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()   
 
-if args.device == "cuda":
-    test_cases = [
-        # M, K, N, test_dtype, device
-        (1024, 128, 1024, torch.float32),
-        (1024, 256, 1024, torch.float32),
-        (1024, 512, 1024, torch.float32),
-        (1024, 1024, 1024, torch.float32),
-    ] 
-    for M, K, N, test_dtype in test_cases:
-        test_cuda(M, K, N, test_dtype)
-else:
-    #昇腾机器对高维matmul不支持alpha, beta参数
-    test_cases = [
-        # alpha, beta, a_shape, b_shape, c_shape
-        (1.0, 0.0, (6, 2048), (2048, 2048), (6, 2048)),
-        (1.0, 0.0, (2, 4, 2048), (2, 2048, 2048), (2, 4, 2048)),
-        (1.0, 0.0, (1, 2048), (2048, 2048), (1, 2048)),
-        (1.0, 0.0, (6, 2048), (2048, 2560), (6, 2560)),
-        (1.0 , 0.0, (4, 8 * 6, 64), (4, 64, 6), (4, 8 * 6, 6)),
-    ]
-    if args.device == "mlu":
-        import torch_mlu
-    elif args.device == "npu":
-        import torch_npu
-    for alpha, beta, a_shape, b_shape, c_shape in test_cases:
-        test_guochan(a_shape, b_shape, c_shape, alpha, beta, args.device)
+# if args.device == "cuda":
+#     test_cases = [
+#         # M, K, N, test_dtype, device
+#         (1024, 128, 1024, torch.float32),
+#         (1024, 256, 1024, torch.float32),
+#         (1024, 512, 1024, torch.float32),
+#         (1024, 1024, 1024, torch.float32),
+#     ] 
+#     for M, K, N, test_dtype in test_cases:
+#         test_cuda(M, K, N, test_dtype)
+
+#昇腾机器对高维matmul不支持alpha, beta参数
+test_cases = [
+    # alpha, beta, a_shape, b_shape, c_shape
+    # (1.0, 0.0, (6, 2048), (2048, 2048), (6, 2048)),
+    # (1.0, 0.0, (2, 4, 2048), (2, 2048, 2048), (2, 4, 2048)),
+    # (1.0, 0.0, (1, 2048), (2048, 2048), (1, 2048)),
+    # (1.0, 0.0, (6, 2048), (2048, 2560), (6, 2560)),
+    # (1.0 , 0.0, (4, 8 * 6, 64), (4, 64, 6), (4, 8 * 6, 6)),
+    (1.0, 0.0, (12, 512, 1024), (1024, 1024), (12, 512, 1024)),
+    (1.0, 0.0, (1, 512, 1024), (1024, 1024), (1, 512, 1024)),
+]
+if args.device == "mlu":
+    import torch_mlu
+elif args.device == "npu":
+    import torch_npu
+for alpha, beta, a_shape, b_shape, c_shape in test_cases:
+    test_diaoku(a_shape, b_shape, c_shape, alpha, beta, args.device)
 
     
     

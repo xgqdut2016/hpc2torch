@@ -35,8 +35,8 @@ def bitwisexor(x, y):
     return torch.bitwise_xor(x, y)
 def test(c_shape, a_shape, b_shape, device):
     operators = ["max", "min", "add", "pow", "div", "mul", "bitwiseOr"]
-    operator = operators[1]
-    byteSize = 2
+    operator = operators[2]
+    byteSize = 4
     if (operator[:3] == "bit"):
         if byteSize == 2:
             tensor_dtype = torch.int16
@@ -142,6 +142,23 @@ def test(c_shape, a_shape, b_shape, device):
             ]
             custom_elementwise_time = \
             performance.AscendProfile((lib.mul_aclnn, (aData, bData, cData, aShape, bShape, cShape,
+                                    aDim, bDim, cDim, byteSize)))     
+        if device == "cuda":
+            torch_elementwise_time = performance.CudaProfile((mul, (a, b)))  # 可以替换为mul, div
+            lib.mul_cudnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_elementwise_time = \
+            performance.CudaProfile((lib.mul_cudnn, (aData, bData, cData, aShape, bShape, cShape,
                                     aDim, bDim, cDim, byteSize)))                           
         performance.logBenchmark(torch_elementwise_time, custom_elementwise_time)
         # 将结果转换回 PyTorch 张量以进行比较
@@ -180,6 +197,23 @@ def test(c_shape, a_shape, b_shape, device):
             ]
             custom_elementwise_time = \
             performance.AscendProfile((lib.add_aclnn, (aData, bData, cData, aShape, bShape, cShape,
+                                    aDim, bDim, cDim, byteSize)))  
+        if device == "cuda":
+            torch_elementwise_time = performance.CudaProfile((add, (a, b)))  # 可以替换为mul, div
+            lib.add_cudnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_elementwise_time = \
+            performance.CudaProfile((lib.add_cudnn, (aData, bData, cData, aShape, bShape, cShape,
                                     aDim, bDim, cDim, byteSize)))                           
         performance.logBenchmark(torch_elementwise_time, custom_elementwise_time)
         # 将结果转换回 PyTorch 张量以进行比较
@@ -218,7 +252,24 @@ def test(c_shape, a_shape, b_shape, device):
             ]
             custom_elementwise_time = \
             performance.AscendProfile((lib.max_aclnn, (aData, bData, cData, aShape, bShape, cShape,
-                                    aDim, bDim, cDim, byteSize)))                           
+                                    aDim, bDim, cDim, byteSize)))    
+        if device == "cuda":
+            torch_elementwise_time = performance.CudaProfile((maximum, (a, b)))  # 可以替换为mul, div
+            lib.max_cudnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_elementwise_time = \
+            performance.CudaProfile((lib.max_cudnn, (aData, bData, cData, aShape, bShape, cShape,
+                                    aDim, bDim, cDim, byteSize)))                         
         performance.logBenchmark(torch_elementwise_time, custom_elementwise_time)
         # 将结果转换回 PyTorch 张量以进行比较
         tmpa = maximum(a, b).to('cpu').numpy().flatten()
@@ -256,6 +307,23 @@ def test(c_shape, a_shape, b_shape, device):
             ]
             custom_elementwise_time = \
             performance.AscendProfile((lib.min_aclnn, (aData, bData, cData, aShape, bShape, cShape,
+                                    aDim, bDim, cDim, byteSize)))  
+        if device == "cuda":
+            torch_elementwise_time = performance.CudaProfile((min, (a, b)))  # 可以替换为mul, div
+            lib.min_cudnn.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int
+            ]
+            custom_elementwise_time = \
+            performance.CudaProfile((lib.min_cudnn, (aData, bData, cData, aShape, bShape, cShape,
                                     aDim, bDim, cDim, byteSize)))                           
         performance.logBenchmark(torch_elementwise_time, custom_elementwise_time)
         # 将结果转换回 PyTorch 张量以进行比较
@@ -419,15 +487,16 @@ args = parser.parse_args()
 
 test_cases = [
         # c_shape, a_shape, b_shape
-        ((1, 3), (1, 3), (1, 3)),
-        ((2, 4, 3), (2, 1, 3), (4, 3)),
-        ((2, 3, 4, 5), (2, 3, 4, 5), (5,)),
+        # ((1, 3), (1, 3), (1, 3)),
+        # ((2, 4, 3), (2, 1, 3), (4, 3)),
+        # ((2, 3, 4, 5), (2, 3, 4, 5), (5,)),
 
-        ((3, 2, 4, 5), (4, 5), (3, 2, 1, 1)),
-        ((3, 20, 33), (3, 20, 33), (3, 20, 33)),
-        ((32, 3, 112, 112), (32, 3, 112, 112), (32, 3, 112, 112)),
+        # ((3, 2, 4, 5), (4, 5), (3, 2, 1, 1)),
+        # ((3, 20, 33), (3, 20, 33), (3, 20, 33)),
+        # ((32, 3, 112, 112), (32, 3, 112, 112), (32, 3, 112, 112)),
 
-        
+        ((12, 512, 4096), (12, 512, 4096), (12, 512, 4096)),
+        ((1, 512, 4096), (1, 512, 4096), (1, 512, 4096)),
 ]
 
 if args.device == 'mlu':
