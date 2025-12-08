@@ -1,5 +1,5 @@
 #include <cuda.h>
-
+#if defined ENABLE_NVIDIA_API
 const int TM = 8;
 const int TN = 8;
 const int BLOCK_DIM_x = 16;
@@ -7,14 +7,15 @@ const int BLOCK_DIM_y = 16;
 const int BM = TM * BLOCK_DIM_x;
 const int BN = TN * BLOCK_DIM_y;
 const int BK = 8;
+
 //
 #include <mma.h>
 using namespace nvcuda;
 const int WMMA_M = 16;
 const int WMMA_N = 16;
 const int WMMA_K = 8;
-const int warpSize = 32;
-const int warpNum = BLOCK_DIM_x * BLOCK_DIM_y / warpSize;
+const int wSize = 32;
+const int warpNum = BLOCK_DIM_x * BLOCK_DIM_y / wSize;
 const int warpX = (warpNum == 1 ? 1 : 2);
 const int warpY = warpNum / warpX;
 template <int BM, int BN, int BK, int TM, int TN>
@@ -113,7 +114,7 @@ __global__ void row_wmma_ker(float *dA, float *dB, float *dC, int M, int K, int 
     int indA = blockIdx.x * warpX * WMMA_M;
     int indB = blockIdx.y * warpY * WMMA_N;
     int tid = threadIdx.x + threadIdx.y * blockDim.x;
-    int warpId = tid / warpSize;
+    int warpId = tid / wSize;
     int warpIdx = warpId % warpX;
     int warpIdy = warpId / warpX;
 
@@ -164,3 +165,4 @@ extern "C" void matmul_cuda_f32(void const *dA, void const *dB, void *dC, int M,
     // dim3 grid_dim(num_block_x, num_block_y, 1);
     // row_wmma_ker<<<grid_dim, block_dim>>>((float *)dA, (float *)dB, (float *)dC, M, K, N);
 }
+#endif

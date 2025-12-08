@@ -72,10 +72,12 @@ list(APPEND KUNLUN_SOURCE_FILES ${KUNLUN_XPU_SOURCE_FILES} ${KUNLUN_CPP_SOURCE_F
 
 if(USE_CUDA)
   if(EXISTS "/usr/local/cuda")  # 英伟达 CUDA 平台
+    add_definitions(-DENABLE_NVIDIA_API)
     file(GLOB GPU_CUDA_FILES "src/**/gpu/*.cu")
     file(GLOB GPU_CUDNN_FILES "src/**/gpu/*.cpp")
     list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
-  else()  # 登临 DLCC 平台
+  else()  # DL 
+    add_definitions(-DENABLE_DL_API)
     file(GLOB_RECURSE GPU_CUDNN_FILES "src/**/gpu/*.cpp")
     file(GLOB_RECURSE GPU_CUDA_FILES "src/**/gpu/*.cu")
     list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})

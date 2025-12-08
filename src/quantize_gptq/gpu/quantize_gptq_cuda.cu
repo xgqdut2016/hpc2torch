@@ -1,3 +1,4 @@
+#if defined ENABLE_NVIDIA_API
 #include "gptq_marlin.cuh"
 #include <cuda_runtime.h>
 #include <stdio.h>
@@ -29,3 +30,4 @@ extern "C" void caculate_cuda(void *C, void *A, void *packed_weights, void *b_sc
     cudaStreamDestroy(stream);
     cudaFree(workspace);
 }
+#endif
