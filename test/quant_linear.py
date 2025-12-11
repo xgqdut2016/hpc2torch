@@ -1,0 +1,183 @@
+import torch
+import ctypes
+import numpy as np
+import torch.nn as nn
+from functools import partial
+import argparse
+
+import performance
+# 添加上一层目录到模块搜索路径
+import sys
+import os
+
+lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/lib/libmy_library.so')
+lib = ctypes.CDLL(lib_path)
+
+def linearFunction(c, bias, x, w, alpha, beta):
+    if bias is not None:
+        ans = (
+            alpha * torch.matmul(x.to(torch.float32), w.to(torch.float32)).to(x.dtype)
+            + beta * c
+            + bias
+        )
+    else:
+        ans = (
+            alpha * torch.matmul(x.to(torch.float32), w.to(torch.float32)).to(x.dtype)
+            + beta * c
+        )
+    return ans
+def computeQuant(
+        device,
+        x, 
+        symmetric
+):
+    x_ptr = ctypes.cast(x.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    byteSize = 4
+    if x.dtype == torch.float16 or x.dtype == torch.bfloat16:
+        byteSize = 2
+    elif x.dtype == torch.float:
+        byteSize = 4
+    M, K = x.shape
+    x_packed = torch.zeros((M, K), device=device, dtype=torch.int8, requires_grad=False)
+    x_packed_ptr = ctypes.cast(x_packed.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    x_scale = torch.rand((M, 1), device=device, dtype=x.dtype, requires_grad=False)
+    x_scale_ptr = ctypes.cast(x_scale.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    x_zero = None
+    x_zero_ptr = None
+    if symmetric == False:
+        x_zero = torch.rand((M, 1), device=device, dtype=x.dtype, requires_grad=False)
+        x_zero_ptr = ctypes.cast(x_zero.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    
+    if device == "cuda":
+        lib.quant_nv.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
+        ]
+        lib.quant_nv(x_packed_ptr, x_scale_ptr, x_zero_ptr, x_ptr, M, K, byteSize)
+    return x_packed, x_scale, x_zero
+def test(
+    x_shape,
+    w_shape,
+    symmetric,
+    bias_exit,
+    y_shape,
+    alpha,
+    beta,
+    device
+    ):
+    byteSize = 4
+    test_dtype = torch.float16
+    if byteSize == 4:
+        test_dtype = torch.float32
+    print(
+        f"Testing Quant Linear on {device} with x_shape:{x_shape}, w_shape:{w_shape}, symmetric:{symmetric}, bias:{bias_exit}, alpha:{alpha}, beta:{beta}, dtype:{test_dtype}"
+    )
+    M, K = x_shape
+    N = w_shape[1]
+    if bias_exit:
+        bias = torch.ones((N, ), device=device, dtype=test_dtype, requires_grad=False)
+        bias_ptr = ctypes.cast(bias.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    else:
+        bias = None
+        bias_ptr = None
+    x = torch.ones(x_shape, device=device, dtype=test_dtype, requires_grad=False)
+    w = torch.ones(w_shape, device=device, dtype=test_dtype, requires_grad=False)
+    y = torch.ones(y_shape, device=device, dtype=test_dtype, requires_grad=False)
+    output = torch.zeros(y_shape, device=device, dtype=test_dtype, requires_grad=False)
+
+    
+    y_ptr = ctypes.cast(y.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    output_ptr = ctypes.cast(output.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    
+    x_packed, x_scale, x_zero = computeQuant(
+            device,
+            x, 
+            symmetric
+    )
+    w_packed, w_scale, w_zero = computeQuant(
+            device,
+            w.t().contiguous(), 
+            symmetric
+    )
+    # print(w_packed, w_scale, w_zero)
+    # print(x_packed, x_scale, x_zero)
+    x_packed_ptr = ctypes.cast(x_packed.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    x_scale_ptr = ctypes.cast(x_scale.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    
+    w_packed_ptr = ctypes.cast(w_packed.t().contiguous().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    w_scale_ptr = ctypes.cast(w_scale.t().contiguous().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    if symmetric == False:
+        x_zero_ptr = ctypes.cast(x_zero.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        w_zero_ptr = ctypes.cast(w_zero.t().contiguous().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    else:
+        x_zero_ptr = None
+        w_zero_ptr = None
+    if device == "cuda":
+        torch_quant_linear_time = performance.CudaProfile((linearFunction, (y, bias, x, w, alpha, beta))) 
+        lib.linear_nv.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_float,
+            ctypes.c_float,
+            ctypes.c_int
+        ]
+        
+        custom_quant_linear_time = \
+        performance.CudaProfile((lib.linear_nv, (output_ptr, y_ptr, bias_ptr, 
+                      x_packed_ptr, x_scale_ptr, x_zero_ptr, 
+                      w_packed_ptr, w_scale_ptr, w_zero_ptr, 
+                      M, K, N, alpha, beta, byteSize)))
+        
+    performance.logBenchmark(torch_quant_linear_time, custom_quant_linear_time)
+    # 将结果转换回 PyTorch 张量以进行比较
+    tmpa = linearFunction(y, bias, x, w, alpha, beta).to('cpu').detach().numpy().flatten()
+    
+    tmpb = output.to('cpu').detach().numpy().flatten()
+    print(tmpa)
+    print(tmpb)
+    
+    atol = max(abs(tmpa - tmpb))
+
+    rtol = atol / (max(abs(tmpb)) + 1e-8)
+
+
+    print("absolute error:%.4e"%(atol))
+    print("relative error:%.4e"%(rtol))
+
+# 解析命令行参数
+parser = argparse.ArgumentParser(description="Test layernorm on different devices.")
+parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
+args = parser.parse_args()    
+
+test_cases = [
+        # x_shape, w_shape, symmetric, bias_exit, y_shape, alpha, beta
+        ((8, 8), (8, 8), True, True, (8, 8), 1.0, 0.0),
+        # ((128, 512), (512, 1024), True, False, (128, 1024), 1.0, 0.0),
+        # ((128, 128), (128, 128), False, True, (128, 128), 2.0, 1.0),
+        # ((256, 1024), (1024, 2048), True, False, (256, 2048), 1.0, 1.0),
+        # ((256, 2048), (2048, 1024), False, True, (256, 1024), 1.5, 2.5),
+        # ((1024, 2048), (2048, 4096), True, False, (1024, 4096), 1.0, 0.0),
+]
+
+if args.device == 'mlu':
+    import torch_mlu
+if args.device == 'npu':
+    import torch_npu
+# 执行过滤后的测试用例
+for x_shape, w_shape, symmetric, bias_exit, y_shape, alpha, beta in test_cases:
+    test(x_shape, w_shape, symmetric, bias_exit, y_shape, alpha, beta, args.device)

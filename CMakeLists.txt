@@ -76,8 +76,17 @@ if(USE_CUDA)
     file(GLOB GPU_CUDA_FILES "src/**/gpu/*.cu")
     file(GLOB GPU_CUDNN_FILES "src/**/gpu/*.cpp")
     list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
+    if(EXISTS "/data/shared/xiaogq/cutlass/")
+        include_directories("/data/shared/xiaogq/cutlass/include")
+    endif()
+    
+    # 或者从环境变量获取
+    if(DEFINED ENV{CUTLASS_PATH})
+        include_directories("$ENV{CUTLASS_PATH}/include")
+    endif()
+    
   else()  # DL 
-    add_definitions(-DENABLE_DL_API)
+    add_definitions(-DENABLE_QL_API)
     file(GLOB_RECURSE GPU_CUDNN_FILES "src/**/gpu/*.cpp")
     file(GLOB_RECURSE GPU_CUDA_FILES "src/**/gpu/*.cu")
     list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
@@ -102,7 +111,9 @@ if(USE_CUDA)
     enable_language(CUDA)
     list(APPEND ALL_SOURCE_FILES ${CUDA_SOURCE_FILES} ${CPP_SOURCE_FILES})
     add_library(my_library SHARED ${ALL_SOURCE_FILES})
-    
+    target_compile_options(my_library PRIVATE 
+        $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+    )
     find_package(CUDA REQUIRED)
     include_directories(${CUDA_INCLUDE_DIRS})
     set_target_properties(my_library PROPERTIES

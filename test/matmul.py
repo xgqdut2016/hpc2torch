@@ -200,6 +200,3 @@ elif args.device == "npu":
     import torch_npu
 for alpha, beta, a_shape, b_shape, c_shape in test_cases:
     test_diaoku(a_shape, b_shape, c_shape, alpha, beta, args.device)
-
-    
-    
