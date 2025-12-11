@@ -106,14 +106,18 @@ def test(
     )
     # print(w_packed, w_scale, w_zero)
     # print(x_packed, x_scale, x_zero)
+    w_packed_t = w_packed.t().contiguous()
+    w_scale_t = w_scale.t().contiguous()
+    
     x_packed_ptr = ctypes.cast(x_packed.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     x_scale_ptr = ctypes.cast(x_scale.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     
-    w_packed_ptr = ctypes.cast(w_packed.t().contiguous().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    w_scale_ptr = ctypes.cast(w_scale.t().contiguous().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    w_packed_ptr = ctypes.cast(w_packed_t.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    w_scale_ptr = ctypes.cast(w_scale_t.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     if symmetric == False:
+        w_zero_t = w_zero.t().contiguous()
         x_zero_ptr = ctypes.cast(x_zero.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-        w_zero_ptr = ctypes.cast(w_zero.t().contiguous().data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+        w_zero_ptr = ctypes.cast(w_zero_t.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     else:
         x_zero_ptr = None
         w_zero_ptr = None
@@ -148,8 +152,12 @@ def test(
     tmpa = linearFunction(y, bias, x, w, alpha, beta).to('cpu').detach().numpy().flatten()
     
     tmpb = output.to('cpu').detach().numpy().flatten()
-    print(tmpa)
-    print(tmpb)
+    # print(x_packed)
+    # print(w_packed.t().contiguous())
+    
+    # print(output, output.dtype)
+    # print(tmpa)
+    # print(tmpb)
     
     atol = max(abs(tmpa - tmpb))
 
@@ -167,11 +175,11 @@ args = parser.parse_args()
 test_cases = [
         # x_shape, w_shape, symmetric, bias_exit, y_shape, alpha, beta
         ((8, 8), (8, 8), True, True, (8, 8), 1.0, 0.0),
-        # ((128, 512), (512, 1024), True, False, (128, 1024), 1.0, 0.0),
-        # ((128, 128), (128, 128), False, True, (128, 128), 2.0, 1.0),
-        # ((256, 1024), (1024, 2048), True, False, (256, 2048), 1.0, 1.0),
-        # ((256, 2048), (2048, 1024), False, True, (256, 1024), 1.5, 2.5),
-        # ((1024, 2048), (2048, 4096), True, False, (1024, 4096), 1.0, 0.0),
+        ((128, 512), (512, 1024), True, False, (128, 1024), 1.0, 0.0),
+        ((128, 128), (128, 128), False, True, (128, 128), 2.0, 1.0),
+        ((256, 1024), (1024, 2048), True, False, (256, 2048), 1.0, 1.0),
+        ((256, 2048), (2048, 1024), False, True, (256, 1024), 1.5, 2.5),
+        ((1024, 2048), (2048, 4096), True, False, (1024, 4096), 1.0, 0.0),
 ]
 
 if args.device == 'mlu':
