@@ -72,7 +72,6 @@ list(APPEND KUNLUN_SOURCE_FILES ${KUNLUN_XPU_SOURCE_FILES} ${KUNLUN_CPP_SOURCE_F
 
 if(USE_CUDA)
   if(EXISTS "/usr/local/cuda")  # 英伟达 CUDA 平台
-    add_definitions(-DENABLE_NVIDIA_API)
     file(GLOB GPU_CUDA_FILES "src/**/gpu/*.cu")
     file(GLOB GPU_CUDNN_FILES "src/**/gpu/*.cpp")
     list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
@@ -86,7 +85,6 @@ if(USE_CUDA)
     endif()
     
   else()  # DL 
-    add_definitions(-DENABLE_QL_API)
     file(GLOB_RECURSE GPU_CUDNN_FILES "src/**/gpu/*.cpp")
     file(GLOB_RECURSE GPU_CUDA_FILES "src/**/gpu/*.cu")
     list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
@@ -107,6 +105,7 @@ list(APPEND TECO_SOURCE_FILES ${TECO_SCPP_FILES})
 if(USE_CUDA)
   if(EXISTS "/usr/local/cuda")
     # ========== NVIDIA CUDA 平台 ==========
+    add_definitions(-DENABLE_NVIDIA_API)
     message(STATUS "Detected NVIDIA CUDA environment")
     enable_language(CUDA)
     list(APPEND ALL_SOURCE_FILES ${CUDA_SOURCE_FILES} ${CPP_SOURCE_FILES})
@@ -149,7 +148,7 @@ if(USE_CUDA)
       add_custom_command(
         OUTPUT ${obj_path}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${obj_dir}
-        COMMAND ${DLCC_PATH} -c ${cu_file} -o ${obj_path}
+        COMMAND ${DLCC_PATH} -DENABLE_QL_API -c ${cu_file} -o ${obj_path} #这个地方增加ENABLE_QL_API宏定义
                 --cuda-path=${DLCC_CUDA_PATH}
                 --cuda-gpu-arch=${DLCC_ARCH}
                 -I${PROJECT_SOURCE_DIR}/include -O2 -std=c++17 -fPIC

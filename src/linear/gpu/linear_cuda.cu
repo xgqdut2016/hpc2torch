@@ -1,5 +1,6 @@
 #include <cuda.h>
 #include <cublas_v2.h>
+#include <stdio.h>
 template <typename Tdata>
 __device__ void postKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const Tdata *bias, const int8_t *x_packed, const Tdata *x_scale, const Tdata *x_zero, const int8_t *w_packed, const Tdata *w_scale, const Tdata *w_zero, int M, int K, int N, float alpha, float beta)
 {

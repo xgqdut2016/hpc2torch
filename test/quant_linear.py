@@ -80,14 +80,14 @@ def test(
     M, K = x_shape
     N = w_shape[1]
     if bias_exit:
-        bias = torch.ones((N, ), device=device, dtype=test_dtype, requires_grad=False)
+        bias = torch.rand((N, ), device=device, dtype=test_dtype, requires_grad=False)
         bias_ptr = ctypes.cast(bias.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     else:
         bias = None
         bias_ptr = None
-    x = torch.ones(x_shape, device=device, dtype=test_dtype, requires_grad=False)
-    w = torch.ones(w_shape, device=device, dtype=test_dtype, requires_grad=False)
-    y = torch.ones(y_shape, device=device, dtype=test_dtype, requires_grad=False)
+    x = torch.rand(x_shape, device=device, dtype=test_dtype, requires_grad=False)
+    w = torch.rand(w_shape, device=device, dtype=test_dtype, requires_grad=False)
+    y = torch.rand(y_shape, device=device, dtype=test_dtype, requires_grad=False)
     output = torch.zeros(y_shape, device=device, dtype=test_dtype, requires_grad=False)
 
     
