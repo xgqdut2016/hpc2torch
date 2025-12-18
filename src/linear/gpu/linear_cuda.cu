@@ -91,34 +91,47 @@ __device__ void postSymKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const
 #include "cutlass/layout/matrix.h"
 #include "cutlass/layout/tensor.h"
 void int8Gemm(
-    const int8_t *x_packed, const int8_t *w_packed, int32_t *y_packed,
-    int M, int N, int K, cudaStream_t stream)
+    const int8_t *x_packed, // [M, K], RowMajor
+    const int8_t *w_packed, // [K, N], RowMajor
+    int32_t *y_packed,      // [M, N], RowMajor
+    int M, int N, int K,
+    cudaStream_t stream)
 {
-    int lda = M;
-    int ldb = K;
-    int ldc = M;
-    using ColumnMajor = cutlass::layout::ColumnMajor;
-    using CutlassGemm = cutlass::gemm::device::Gemm<int8_t,       // Data-type of A matrix
-                                                    ColumnMajor,  // Layout of A matrix
-                                                    int8_t,       // Data-type of B matrix
-                                                    ColumnMajor,  // Layout of B matrix
-                                                    int32_t,      // Data-type of C matrix
-                                                    ColumnMajor>; // Layout of C matrix
+    using ElementA = int8_t;
+    using ElementB = int8_t;
+    using ElementC = int32_t;
+    using ElementAccumulator = int32_t;
 
-    // Define a CUTLASS GEMM type
-    CutlassGemm gemm_operator;
+    using LayoutA = cutlass::layout::RowMajor;
+    using LayoutB = cutlass::layout::RowMajor;
+    using LayoutC = cutlass::layout::RowMajor;
 
-    CutlassGemm::Arguments args({M, N, K},       // Gemm Problem dimensions
-                                {x_packed, lda}, // Tensor-ref for source matrix A
-                                {w_packed, ldb}, // Tensor-ref for source matrix B
-                                {y_packed, ldc}, // Tensor-ref for source matrix C
-                                {y_packed, ldc}, // Tensor-ref for destination matrix D (may be different memory than source C matrix)
-                                {1, 0});         // Scalars used in the Epilogue
-    cutlass::Status status = gemm_operator(args);
+    using Gemm = cutlass::gemm::device::Gemm<
+        ElementA, LayoutA,
+        ElementB, LayoutB,
+        ElementC, LayoutC,
+        ElementAccumulator>;
+
+    // RowMajor: leading dimension = number of columns
+    int lda = K;
+    int ldb = N;
+    int ldc = N;
+
+    Gemm gemm_op;
+
+    typename Gemm::Arguments args(
+        {M, N, K},       // GEMM shape
+        {x_packed, lda}, // A: [M, K]
+        {w_packed, ldb}, // B: [K, N]
+        {y_packed, ldc}, // C (ignored when beta = 0)
+        {y_packed, ldc}, // D
+        {1, 0}           // alpha = 1, beta = 0
+    );
+
+    cutlass::Status status = gemm_op(args, stream);
     if (status != cutlass::Status::kSuccess)
     {
-        printf("[CUTLASS SIMT] run failed: %d\n", int(status));
-        return;
+        printf("[CUTLASS RowMajor int8 GEMM] failed: %d\n", int(status));
     }
 }
 #endif
@@ -196,6 +209,42 @@ void launchKernel(void *y,
     cublasDestroy(handle);
 #endif
 
+    // int8_t *host_x_packed;
+    // int8_t *host_w_packed;
+    // int32_t *host_y_packed;
+    // host_x_packed = (int8_t *)malloc(M * K * sizeof(int8_t));
+    // cudaMemcpy(host_x_packed, x_packed, M * K * sizeof(int8_t), cudaMemcpyDeviceToHost);
+    // for (int i = 0; i < M * K; i++)
+    // {
+    //     printf("%d ", host_x_packed[i]);
+    //     if ((i + 1) % K == 0)
+    //     {
+    //         printf("\n");
+    //     }
+    // }
+    // printf("\n");
+    // host_w_packed = (int8_t *)malloc(K * N * sizeof(int8_t));
+    // cudaMemcpy(host_w_packed, w_packed, K * N * sizeof(int8_t), cudaMemcpyDeviceToHost);
+    // for (int i = 0; i < K * N; i++)
+    // {
+    //     printf("%d ", host_w_packed[i]);
+    //     if ((i + 1) % N == 0)
+    //     {
+    //         printf("\n");
+    //     }
+    // }
+    // printf("\n");
+    // host_y_packed = (int32_t *)malloc(M * N * sizeof(int32_t));
+    // cudaMemcpy(host_y_packed, y_packed, M * N * sizeof(int32_t), cudaMemcpyDeviceToHost);
+    // for (int i = 0; i < M * N; i++)
+    // {
+    //     printf("%d ", host_y_packed[i]);
+    //     if ((i + 1) % N == 0)
+    //     {
+    //         printf("\n");
+    //     }
+    // }
+    // printf("\n");
     constexpr unsigned int BLOCK_SIZE_x = 32;
     constexpr unsigned int BLOCK_SIZE_y = 32;
 

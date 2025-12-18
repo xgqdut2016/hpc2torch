@@ -12,7 +12,58 @@ import os
 
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/lib/libmy_library.so')
 lib = ctypes.CDLL(lib_path)
+def quantWeights(w: torch.Tensor, symmetric, axis):
+    """
+    对权重矩阵 w ∈ [K, N] 做 per-channel (按列) 量化。
+    返回:
+      w_packed: int8 量化权重，形状 [K, N]
+      w_scale:  每列的scale，形状 [1, N]，dtype与w相同
+      w_zero:   每列的zero point，形状 [1, N]，dtype与w相同
+    """
+    assert w.dim() == 2, "w must be [K, N]"
+    if symmetric:
+        # 对称量化：zero=0, 只用最大绝对值
+        w_abs_max = torch.max(w.abs(), dim=axis, keepdim=True)[0]
 
+        # 避免除 0
+        w_scale = w_abs_max / 127.0
+        w_scale = torch.clamp(w_scale, min=1e-8)
+
+        # 计算量化值 q = round(w / scale)
+        w_q = torch.round(w / w_scale)
+
+        # 限制到 [-128, 127]
+        w_q = torch.clamp(w_q, -128, 127)
+
+        # 转 int8
+        w_packed = w_q.to(torch.int8)
+
+        # 对称量化 zero 固定为 0
+        w_zero = None
+
+        return w_packed, w_scale.to(w.dtype), w_zero
+    else:
+        # 计算每列的最小值和最大值
+        w_min = w.min(dim=axis, keepdim=True)[0]
+        w_max = w.max(dim=axis, keepdim=True)[0]
+
+        # 避免除以零
+        w_scale = (w_max - w_min) / 255.0
+        w_scale = torch.clamp(w_scale, min=1e-8)
+
+        # 计算zero point
+        w_zero = -w_min / w_scale - 128.0
+
+        # 计算量化值
+        w_q = torch.round(w / w_scale + w_zero)
+
+        # 限制范围[-128, 127]
+        w_q = torch.clamp(w_q, -128, 127)
+
+        # 转为int8
+        w_packed = w_q.to(torch.int8)
+
+        return w_packed, w_scale.to(w.dtype), w_zero.to(w.dtype)
 def linearFunction(c, bias, x, w, alpha, beta):
     if bias is not None:
         ans = (
@@ -35,7 +86,7 @@ def computeQuant(
     byteSize = 4
     if x.dtype == torch.float16 or x.dtype == torch.bfloat16:
         byteSize = 2
-    elif x.dtype == torch.float:
+    elif x.dtype == torch.float32:
         byteSize = 4
     M, K = x.shape
     x_packed = torch.zeros((M, K), device=device, dtype=torch.int8, requires_grad=False)
@@ -74,6 +125,11 @@ def test(
     test_dtype = torch.float16
     if byteSize == 4:
         test_dtype = torch.float32
+    atol = 1e-3; rtol = 5e-2
+    if test_dtype == torch.float16 or test_dtype == torch.bfloat16:
+        atol = 1e-3; rtol = 5e-2
+    elif test_dtype == torch.float32:
+        atol = 3e-5; rtol = 5e-3
     print(
         f"Testing Quant Linear on {device} with x_shape:{x_shape}, w_shape:{w_shape}, symmetric:{symmetric}, bias:{bias_exit}, alpha:{alpha}, beta:{beta}, dtype:{test_dtype}"
     )
@@ -104,10 +160,13 @@ def test(
             w.t().contiguous(), 
             symmetric
     )
-    # print(w_packed, w_scale, w_zero)
-    # print(x_packed, x_scale, x_zero)
+    
     w_packed_t = w_packed.t().contiguous()
     w_scale_t = w_scale.t().contiguous()
+    # x_p, x_s, x_z = quantWeights(x, symmetric, 1)
+    # w_p, w_s, w_z = quantWeights(w, symmetric, 0)
+    # print(x_p - x_packed)
+    # print(w_p - w_packed_t)
     
     x_packed_ptr = ctypes.cast(x_packed.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     x_scale_ptr = ctypes.cast(x_scale.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
@@ -149,6 +208,7 @@ def test(
         
     performance.logBenchmark(torch_quant_linear_time, custom_quant_linear_time)
     # 将结果转换回 PyTorch 张量以进行比较
+    assert torch.allclose(linearFunction(y, bias, x, w, alpha, beta), output, atol=atol, rtol=rtol)
     tmpa = linearFunction(y, bias, x, w, alpha, beta).to('cpu').detach().numpy().flatten()
     
     tmpb = output.to('cpu').detach().numpy().flatten()

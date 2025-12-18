@@ -75,8 +75,8 @@ if(USE_CUDA)
     file(GLOB GPU_CUDA_FILES "src/**/gpu/*.cu")
     file(GLOB GPU_CUDNN_FILES "src/**/gpu/*.cpp")
     list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
-    if(EXISTS "/data/shared/xiaogq/cutlass/")
-        include_directories("/data/shared/xiaogq/cutlass/include")
+    if(EXISTS "/home/xiaogq/cutlass/")
+        include_directories("/home/xiaogq/cutlass/include")
     endif()
     
     # 或者从环境变量获取
