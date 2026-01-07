@@ -72,19 +72,17 @@ list(APPEND KUNLUN_SOURCE_FILES ${KUNLUN_XPU_SOURCE_FILES} ${KUNLUN_CPP_SOURCE_F
 
 if(USE_CUDA)
   if(EXISTS "/usr/local/cuda")  # 英伟达 CUDA 平台
+    if(DEFINED ENV{CUTLASS_ROOT})
+        include_directories("$ENV{CUTLASS_ROOT}")
+    endif()
     file(GLOB GPU_CUDA_FILES "src/**/gpu/*.cu")
     file(GLOB GPU_CUDNN_FILES "src/**/gpu/*.cpp")
     list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
-    if(EXISTS "/home/xiaogq/cutlass/")
-        include_directories("/home/xiaogq/cutlass/include")
-    endif()
-    
-    # 或者从环境变量获取
-    if(DEFINED ENV{CUTLASS_PATH})
-        include_directories("$ENV{CUTLASS_PATH}/include")
-    endif()
-    
+
   else()  # DL 
+    if(DEFINED ENV{CUTLASS_ROOT})
+        set(CUTLASS_INCLUDE $ENV{CUTLASS_ROOT})
+    endif()
     file(GLOB_RECURSE GPU_CUDNN_FILES "src/**/gpu/*.cpp")
     file(GLOB_RECURSE GPU_CUDA_FILES "src/**/gpu/*.cu")
     list(APPEND CUDA_SOURCE_FILES ${GPU_CUDA_FILES} ${GPU_CUDNN_FILES})
@@ -121,13 +119,13 @@ if(USE_CUDA)
     target_link_libraries(my_library ${CUDA_LIBRARIES} cudnn cublas)
 
   else()
-    # ========== 登临平台 DLCC ==========
+    # ========== 平台 DLCC ==========
     message(STATUS "Detected DLCC environment, configuring CUDA build")
-
+    
     add_compile_definitions(USE_CUDA=1)
 
-    set(DLCC_PATH /home/qy/Desktop/sdk/sdk/bin/dlcc)
-    set(DLCC_CUDA_PATH /home/qy/Desktop/sdk/sdk)
+    set(DLCC_PATH /usr/local/denglin/sdk/bin/dlcc)
+    set(DLCC_CUDA_PATH /usr/local/denglin/sdk/)
     set(DLCC_ARCH dlgput64)
 
     # 分离出 .cu 和 .cc/.cpp 文件
@@ -148,10 +146,13 @@ if(USE_CUDA)
       add_custom_command(
         OUTPUT ${obj_path}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${obj_dir}
-        COMMAND ${DLCC_PATH} -DENABLE_QL_API -c ${cu_file} -o ${obj_path} #这个地方增加ENABLE_QL_API宏定义
+        COMMAND ${DLCC_PATH} -DENABLE_QL_API -c -x cuda ${cu_file} -o ${obj_path} #这个地方增加ENABLE_QL_API宏定义
                 --cuda-path=${DLCC_CUDA_PATH}
                 --cuda-gpu-arch=${DLCC_ARCH}
+                -I${CUTLASS_INCLUDE}
                 -I${PROJECT_SOURCE_DIR}/include -O2 -std=c++17 -fPIC
+                --offload-arch=${DLCC_ARCH},dlgpux64  
+                -mllvm -dlgpu-lower-xtpvn=true
         DEPENDS ${cu_file}
         COMMENT "Compiling ${cu_file} with dlcc"
         VERBATIM

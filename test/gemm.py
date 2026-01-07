@@ -117,7 +117,7 @@ def test(a_shape, b_shape, c_shape, alpha, beta, device):
         (A_ptr, B_ptr, C_ptr, M, K, N, alpha, beta, byteSize)))
     performance.logBenchmark(torch_matmul_time, custom_matmul_time)
 
-    for i in range(40): #对于alpha , beta > 0的情况，此时需要特别注意
+    for i in range(1): #对于alpha , beta > 0的情况，此时需要特别注意
         C_clone = gemm(A, B, C_clone, alpha, beta, output_dtype)
     tmpa = C_clone.to('cpu').detach().numpy().flatten()
     
@@ -140,11 +140,11 @@ args = parser.parse_args()
 
 test_cases = [
     # alpha, beta, a_shape, b_shape, c_shape
-    (1.0, 0.0, (6, 2048), (2048, 2048), (6, 2048)),
+    (1.0, 2.0, (6, 2048), (2048, 2048), (6, 2048)),
     (1.0, 0.0, (4, 2050), (2050, 2048), (4, 2048)),
     (1.0, 0.0, (128, 512), (512, 1024), (128, 1024)),
-    (1.0, 0.0, (256, 1024), (1024, 2048), (256, 2048)),
-    (1.0, 0.0, (1024, 2048), (2048, 1040), (1024, 1040)),
+    (1.0, 4.5, (256, 1024), (1024, 2048), (256, 2048)),
+    (3.0, 0.5, (1024, 2048), (2048, 1040), (1024, 1040)),
     (1.0, 0.0, (1, 512), (512, 8), (1, 8)),
     (1.0, 0.0, (2048, 256), (256, 4096), (2048, 4096)),
     
