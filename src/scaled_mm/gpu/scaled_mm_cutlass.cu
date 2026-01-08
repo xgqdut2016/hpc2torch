@@ -1,3 +1,4 @@
+#if defined ENABLE_NVIDIA_API
 #include "int8_gemm_kernel.cuh"
 #include <type_traits>
 #include <string>
@@ -160,3 +161,4 @@ extern "C" void int8_scaled_gemm_cutlass(
         break;
     }
 }
+#endif

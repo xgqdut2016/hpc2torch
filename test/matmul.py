@@ -3,7 +3,7 @@ import ctypes
 import torch.nn.functional as F
 import argparse
 import numpy as np
-import performance
+from utils import performance
 # 添加上一层目录到模块搜索路径
 import sys
 import os
