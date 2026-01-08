@@ -13,8 +13,6 @@ import os
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/lib/libmy_library.so')
 lib = ctypes.CDLL(lib_path)
 
-import torch
-
 def gemm(
     x_packed: torch.Tensor,
     w_packed: torch.Tensor,
@@ -95,9 +93,6 @@ def test(a_shape, b_shape, c_shape, alpha, beta, device):
     B_ptr = ctypes.cast(B.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     C_ptr = ctypes.cast(C.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
 
-    aShape = np.array(a_shape, dtype=np.int32).ctypes.data_as(ctypes.POINTER(ctypes.c_int))
-    bShape = np.array(b_shape, dtype=np.int32).ctypes.data_as(ctypes.POINTER(ctypes.c_int))
-    cShape = np.array(c_shape, dtype=np.int32).ctypes.data_as(ctypes.POINTER(ctypes.c_int))
 
     if device == "cuda":
         torch_matmul_time = performance.CudaProfile((gemm, (A, B, C_clone, alpha, beta, output_dtype))) 
@@ -117,7 +112,7 @@ def test(a_shape, b_shape, c_shape, alpha, beta, device):
         (A_ptr, B_ptr, C_ptr, M, K, N, alpha, beta, byteSize)))
     performance.logBenchmark(torch_matmul_time, custom_matmul_time)
 
-    for i in range(1): #对于alpha , beta > 0的情况，此时需要特别注意
+    for i in range(40): #对于alpha , beta > 0的情况，此时需要特别注意
         C_clone = gemm(A, B, C_clone, alpha, beta, output_dtype)
     tmpa = C_clone.to('cpu').detach().numpy().flatten()
     
@@ -133,7 +128,7 @@ def test(a_shape, b_shape, c_shape, alpha, beta, device):
 
     
 # 解析命令行参数
-parser = argparse.ArgumentParser(description="Test matmul on different devices.")
+parser = argparse.ArgumentParser(description="Test gemm on different devices.")
 parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()   
 
