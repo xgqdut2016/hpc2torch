@@ -20,6 +20,8 @@ python test/test_softmax.py --device cpu
 
 # 已知问题
 
+## 英伟达平台
+编译cutlass相关代码需要选择合适的sm，另外对于cutlass仓库，需要把tools/util/include/cutlass/util目录移动到include/cutlass/下面
 ## 寒武纪平台
 matmul算子在f16的数据测试中精度存在巨大问题，原因不明
 
