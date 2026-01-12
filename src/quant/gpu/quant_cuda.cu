@@ -8,8 +8,8 @@ __device__ inline int round_half_away_from_zero(float x)
 }
 
 template <typename Tdata, unsigned int BLOCK_SIZE>
-__device__ void blockQuantKernel(
-    int8_t *x_packed, Tdata *x_scale, Tdata *x_zero, const Tdata *x,
+__device__ void blockPerChannelQuantI8Kernel(
+    int8_t *x_packed, float *x_scale, float *x_zero, const Tdata *x,
     int M, int K)
 {
     int row = blockIdx.x;
@@ -46,7 +46,6 @@ __device__ void blockQuantKernel(
     }
     __syncthreads();
 
-    // ---- 3. 使用 float（匹配 python）计算 scale/zero ----
     float global_max = global_max_f;
     float global_min = global_min_f;
 
@@ -59,11 +58,9 @@ __device__ void blockQuantKernel(
     float inv_scale = 1.0f / scale;
     float zero = -global_min * inv_scale - 128.0f;
 
-    // 写回 scale, zero
-    x_scale[row] = (Tdata)scale;
-    x_zero[row] = (Tdata)zero;
+    x_scale[row] = scale;
+    x_zero[row] = zero;
 
-    // ---- 4. 使用 float + half-away-from-zero（与 Python 完全一致）----
     for (int ind = threadIdx.x; ind < K; ind += BLOCK_SIZE)
     {
 
@@ -84,10 +81,13 @@ __device__ void blockQuantKernel(
         x_packed[tid + ind] = (int8_t)q;
     }
 }
-
+/**
+ * Performs per-channel symmetric quantization to int8 for large matrices (K >= 1024).
+ * Uses zero-centered scaling only, no zero point, and packs quantized data.
+ */
 template <typename Tdata, unsigned int BLOCK_SIZE>
-__device__ void blockQuantSymKernel(
-    int8_t *x_packed, Tdata *x_scale, const Tdata *x,
+__device__ void blockPerChannelQuantI8SymKernel(
+    int8_t *x_packed, float *x_scale, const Tdata *x,
     int M, int K)
 {
     int row = blockIdx.x;
@@ -111,7 +111,6 @@ __device__ void blockQuantSymKernel(
     }
     __syncthreads();
 
-    // ---- 3. 使用 float（匹配 python）计算 scale/zero ----
     float global_max = global_max_f;
 
     float scale = global_max / 127.0f;
@@ -122,10 +121,8 @@ __device__ void blockQuantSymKernel(
 
     float inv_scale = 1.0f / scale;
 
-    // 写回 scale, zero
-    x_scale[row] = (Tdata)scale;
+    x_scale[row] = scale;
 
-    // ---- 4. 使用 float + half-away-from-zero（与 Python 完全一致）----
     for (int ind = threadIdx.x; ind < K; ind += BLOCK_SIZE)
     {
 
@@ -138,9 +135,9 @@ __device__ void blockQuantSymKernel(
         {
             q = 127;
         }
-        if (q < -128)
+        if (q < -127)
         {
-            q = -128;
+            q = -127;
         }
 
         x_packed[tid + ind] = (int8_t)q;
@@ -173,10 +170,13 @@ __inline__ __device__ T WarpAllReduce(T val)
     }
     return val;
 }
-
+/**
+ * Performs per-channel asymmetric quantization to int8 for large matrices (K < 1024).
+ * Computes scale/zero point per channel (column) and packs quantized data.
+ */
 template <typename Tdata, unsigned int BLOCK_SIZE_x, unsigned int BLOCK_SIZE_y>
-__device__ void warpQuantKernel(
-    int8_t *x_packed, Tdata *x_scale, Tdata *x_zero, const Tdata *x,
+__device__ void warpPerChannelQuantI8Kernel(
+    int8_t *x_packed, float *x_scale, float *x_zero, const Tdata *x,
     int M, int K)
 {
     int otherIdx = blockIdx.x * blockDim.y + threadIdx.y;
@@ -209,7 +209,6 @@ __device__ void warpQuantKernel(
         }
         __syncthreads();
 
-        // ---- float scale/zero（与 Python float32 匹配）----
         float max_f = max_total[threadIdx.y];
         float min_f = min_total[threadIdx.y];
 
@@ -222,10 +221,9 @@ __device__ void warpQuantKernel(
         float inv_scale = 1.0f / scale;
         float zero = -min_f * inv_scale - 128.0f;
 
-        x_scale[otherIdx] = (Tdata)scale;
-        x_zero[otherIdx] = (Tdata)zero;
+        x_scale[otherIdx] = scale;
+        x_zero[otherIdx] = zero;
 
-        // ---- float + half-away-from-zero 量化 ----
         for (int ind = threadIdx.x; ind < K; ind += BLOCK_SIZE_x)
         {
             float v = (float)x[tid + ind];
@@ -246,10 +244,13 @@ __device__ void warpQuantKernel(
         }
     }
 }
-
+/**
+ * Performs per-channel symmetric quantization to int8 for large matrices (K < 1024).
+ * Uses zero-centered scaling only, no zero point, and packs quantized data.
+ */
 template <typename Tdata, unsigned int BLOCK_SIZE_x, unsigned int BLOCK_SIZE_y>
-__device__ void warpQuantSymKernel(
-    int8_t *x_packed, Tdata *x_scale, const Tdata *x,
+__device__ void warpPerChannelQuantI8SymKernel(
+    int8_t *x_packed, float *x_scale, const Tdata *x,
     int M, int K)
 {
     int otherIdx = blockIdx.x * blockDim.y + threadIdx.y;
@@ -277,7 +278,6 @@ __device__ void warpQuantSymKernel(
         }
         __syncthreads();
 
-        // ---- float scale/zero（与 Python float32 匹配）----
         float max_f = max_total[threadIdx.y];
 
         float scale = max_f / 127.0f;
@@ -288,9 +288,8 @@ __device__ void warpQuantSymKernel(
 
         float inv_scale = 1.0f / scale;
 
-        x_scale[otherIdx] = (Tdata)scale;
+        x_scale[otherIdx] = scale;
 
-        // ---- float + half-away-from-zero 量化 ----
         for (int ind = threadIdx.x; ind < K; ind += BLOCK_SIZE_x)
         {
             float v = (float)x[tid + ind];
@@ -302,9 +301,9 @@ __device__ void warpQuantSymKernel(
             {
                 q = 127;
             }
-            if (q < -128)
+            if (q < -127)
             {
-                q = -128;
+                q = -127;
             }
 
             x_packed[tid + ind] = (int8_t)q;
@@ -313,46 +312,46 @@ __device__ void warpQuantSymKernel(
 }
 
 template <typename Tdata, unsigned int BLOCK_SIZE>
-__global__ void blockQuant(
-    int8_t *x_packed, Tdata *x_scale, Tdata *x_zero, const Tdata *x, int M, int K)
+__global__ void blockPerChannelQuantI8(
+    int8_t *x_packed, float *x_scale, float *x_zero, const Tdata *x, int M, int K)
 {
-    blockQuantKernel<Tdata, BLOCK_SIZE>(x_packed, x_scale, x_zero, x, M, K);
+    blockPerChannelQuantI8Kernel<Tdata, BLOCK_SIZE>(x_packed, x_scale, x_zero, x, M, K);
 }
 template <typename Tdata, unsigned int BLOCK_SIZE>
-__global__ void blockQuantSym(
-    int8_t *x_packed, Tdata *x_scale, const Tdata *x, int M, int K)
+__global__ void blockPerChannelQuantI8Sym(
+    int8_t *x_packed, float *x_scale, const Tdata *x, int M, int K)
 {
-    blockQuantSymKernel<Tdata, BLOCK_SIZE>(x_packed, x_scale, x, M, K);
+    blockPerChannelQuantI8SymKernel<Tdata, BLOCK_SIZE>(x_packed, x_scale, x, M, K);
 }
 
 template <typename Tdata, unsigned int BLOCK_SIZE_x, unsigned int BLOCK_SIZE_y>
-__global__ void warpQuant(
-    int8_t *x_packed, Tdata *x_scale, Tdata *x_zero, const Tdata *x, int M, int K)
+__global__ void warpPerChannelQuantI8(
+    int8_t *x_packed, float *x_scale, float *x_zero, const Tdata *x, int M, int K)
 {
-    warpQuantKernel<Tdata, BLOCK_SIZE_x, BLOCK_SIZE_y>(x_packed, x_scale, x_zero, x, M, K);
+    warpPerChannelQuantI8Kernel<Tdata, BLOCK_SIZE_x, BLOCK_SIZE_y>(x_packed, x_scale, x_zero, x, M, K);
 }
 template <typename Tdata, unsigned int BLOCK_SIZE_x, unsigned int BLOCK_SIZE_y>
-__global__ void warpQuantSym(
-    int8_t *x_packed, Tdata *x_scale, const Tdata *x, int M, int K)
+__global__ void warpPerChannelQuantI8Sym(
+    int8_t *x_packed, float *x_scale, const Tdata *x, int M, int K)
 {
-    warpQuantSymKernel<Tdata, BLOCK_SIZE_x, BLOCK_SIZE_y>(x_packed, x_scale, x, M, K);
+    warpPerChannelQuantI8SymKernel<Tdata, BLOCK_SIZE_x, BLOCK_SIZE_y>(x_packed, x_scale, x, M, K);
 }
 
 template <unsigned int BLOCK_SIZE, typename Tdata>
-void quantKernel(void *x_packed, void *x_scale, void *x_zero, const void *x, int M, int K)
+void PerChannelQuantI8Kernel(void *x_packed, void *x_scale, void *x_zero, const void *x, int M, int K)
 {
 
     if (K >= 1024)
     {
         if (x_zero == nullptr)
         {
-            blockQuantSym<Tdata, BLOCK_SIZE>
-                <<<M, BLOCK_SIZE>>>((int8_t *)x_packed, (Tdata *)x_scale, (Tdata *)x, M, K);
+            blockPerChannelQuantI8Sym<Tdata, BLOCK_SIZE>
+                <<<M, BLOCK_SIZE>>>((int8_t *)x_packed, (float *)x_scale, (Tdata *)x, M, K);
         }
         else
         {
-            blockQuant<Tdata, BLOCK_SIZE>
-                <<<M, BLOCK_SIZE>>>((int8_t *)x_packed, (Tdata *)x_scale, (Tdata *)x_zero, (Tdata *)x, M, K);
+            blockPerChannelQuantI8<Tdata, BLOCK_SIZE>
+                <<<M, BLOCK_SIZE>>>((int8_t *)x_packed, (float *)x_scale, (float *)x_zero, (Tdata *)x, M, K);
         }
     }
     else
@@ -364,25 +363,25 @@ void quantKernel(void *x_packed, void *x_scale, void *x_zero, const void *x, int
         dim3 grid_dim(num_block_x, 1, 1);
         if (x_zero == nullptr)
         {
-            warpQuantSym<Tdata, BLOCK_SIZE_x, BLOCK_SIZE_y>
-                <<<grid_dim, block_dim>>>((int8_t *)x_packed, (Tdata *)x_scale, (Tdata *)x, M, K);
+            warpPerChannelQuantI8Sym<Tdata, BLOCK_SIZE_x, BLOCK_SIZE_y>
+                <<<grid_dim, block_dim>>>((int8_t *)x_packed, (float *)x_scale, (Tdata *)x, M, K);
         }
         else
         {
-            warpQuant<Tdata, BLOCK_SIZE_x, BLOCK_SIZE_y>
-                <<<grid_dim, block_dim>>>((int8_t *)x_packed, (Tdata *)x_scale, (Tdata *)x_zero, (Tdata *)x, M, K);
+            warpPerChannelQuantI8<Tdata, BLOCK_SIZE_x, BLOCK_SIZE_y>
+                <<<grid_dim, block_dim>>>((int8_t *)x_packed, (float *)x_scale, (float *)x_zero, (Tdata *)x, M, K);
         }
     }
 }
 
-extern "C" void quant_nv(void *x_packed, void *x_scale, void *x_zero, const void *x, int M, int K, int byteSize)
+extern "C" void PerChannelQuantI8_nv(void *x_packed, void *x_scale, void *x_zero, const void *x, int M, int K, int byteSize)
 {
     if (byteSize == 2)
     {
-        quantKernel<1024, half>(x_packed, x_scale, x_zero, x, M, K);
+        PerChannelQuantI8Kernel<1024, half>(x_packed, x_scale, x_zero, x, M, K);
     }
     if (byteSize == 4)
     {
-        quantKernel<1024, float>(x_packed, x_scale, x_zero, x, M, K);
+        PerChannelQuantI8Kernel<1024, float>(x_packed, x_scale, x_zero, x, M, K);
     }
 }

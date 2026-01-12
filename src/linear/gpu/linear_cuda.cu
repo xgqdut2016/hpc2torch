@@ -2,7 +2,7 @@
 #include <cublas_v2.h>
 #include <stdio.h>
 template <typename Tdata>
-__device__ void postKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const Tdata *bias, const int8_t *x_packed, const Tdata *x_scale, const Tdata *x_zero, const int8_t *w_packed, const Tdata *w_scale, const Tdata *w_zero, int M, int K, int N, float alpha, float beta)
+__device__ void postKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const Tdata *bias, const int8_t *x_packed, const float *x_scale, const float *x_zero, const int8_t *w_packed, const float *w_scale, const float *w_zero, int M, int K, int N, float alpha, float beta)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -11,11 +11,11 @@ __device__ void postKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const Td
         return;
     }
     int idx = row * N + col;
-    float output1 = ((float)x_scale[row] * (float)w_scale[col] * ((float)y_packed[idx] + K * (float)x_zero[row] * (float)w_zero[col]));
+    float output1 = (x_scale[row] * w_scale[col] * ((float)y_packed[idx] + K * x_zero[row] * w_zero[col]));
     float output2 = 0.0f;
     float output3 = 0.0f;
-    float tmp2 = (float)x_scale[row] * (float)w_scale[col] * (float)w_zero[col];
-    float tmp3 = (float)x_scale[row] * (float)x_zero[row] * (float)w_scale[col];
+    float tmp2 = x_scale[row] * w_scale[col] * w_zero[col];
+    float tmp3 = x_scale[row] * x_zero[row] * w_scale[col];
     for (int ind = 0; ind < K; ind++)
     {
         output2 += tmp2 * (float)x_packed[row * K + ind];
@@ -27,7 +27,7 @@ __device__ void postKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const Td
 }
 
 template <typename Tdata>
-__device__ void postKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const int8_t *x_packed, const Tdata *x_scale, const Tdata *x_zero, const int8_t *w_packed, const Tdata *w_scale, const Tdata *w_zero, int M, int K, int N, float alpha, float beta)
+__device__ void postKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const int8_t *x_packed, const float *x_scale, const float *x_zero, const int8_t *w_packed, const float *w_scale, const float *w_zero, int M, int K, int N, float alpha, float beta)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -36,11 +36,11 @@ __device__ void postKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const in
         return;
     }
     int idx = row * N + col;
-    float output1 = ((float)x_scale[row] * (float)w_scale[col] * ((float)y_packed[idx] + K * (float)x_zero[row] * (float)w_zero[col]));
+    float output1 = (x_scale[row] * w_scale[col] * ((float)y_packed[idx] + K * x_zero[row] * w_zero[col]));
     float output2 = 0.0f;
     float output3 = 0.0f;
-    float tmp2 = (float)x_scale[row] * (float)w_scale[col] * (float)w_zero[col];
-    float tmp3 = (float)x_scale[row] * (float)x_zero[row] * (float)w_scale[col];
+    float tmp2 = x_scale[row] * w_scale[col] * w_zero[col];
+    float tmp3 = x_scale[row] * x_zero[row] * w_scale[col];
     for (int ind = 0; ind < K; ind++)
     {
         output2 += tmp2 * (float)x_packed[row * K + ind];
@@ -52,7 +52,7 @@ __device__ void postKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const in
 }
 
 template <typename Tdata>
-__device__ void postSymKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const Tdata *bias, const int8_t *x_packed, const Tdata *x_scale, const int8_t *w_packed, const Tdata *w_scale, int M, int K, int N, float alpha, float beta)
+__device__ void postSymKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const Tdata *bias, const int8_t *x_packed, const float *x_scale, const int8_t *w_packed, const float *w_scale, int M, int K, int N, float alpha, float beta)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -61,14 +61,14 @@ __device__ void postSymKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const
         return;
     }
     int idx = row * N + col;
-    float output1 = (float)x_scale[row] * (float)w_scale[col] * ((float)y_packed[idx]);
+    float output1 = x_scale[row] * w_scale[col] * ((float)y_packed[idx]);
 
     float output = alpha * output1 + beta * (float)c[idx] + (float)bias[col];
 
     y[idx] = static_cast<Tdata>(output);
 }
 template <typename Tdata>
-__device__ void postSymKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const int8_t *x_packed, const Tdata *x_scale, const int8_t *w_packed, const Tdata *w_scale, int M, int K, int N, float alpha, float beta)
+__device__ void postSymKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const int8_t *x_packed, const float *x_scale, const int8_t *w_packed, const float *w_scale, int M, int K, int N, float alpha, float beta)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -77,7 +77,7 @@ __device__ void postSymKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const
         return;
     }
     int idx = row * N + col;
-    float output1 = (float)x_scale[row] * (float)w_scale[col] * ((float)y_packed[idx]);
+    float output1 = x_scale[row] * w_scale[col] * ((float)y_packed[idx]);
 
     float output = alpha * output1 + beta * (float)c[idx];
 
@@ -138,26 +138,26 @@ void int8Gemm(
 
 template <typename Tdata>
 __global__ void post(
-    Tdata *y, int32_t *y_packed, const Tdata *c, const Tdata *bias, const int8_t *x_packed, const Tdata *x_scale, const Tdata *x_zero, const int8_t *w_packed, const Tdata *w_scale, const Tdata *w_zero, int M, int K, int N, float alpha, float beta)
+    Tdata *y, int32_t *y_packed, const Tdata *c, const Tdata *bias, const int8_t *x_packed, const float *x_scale, const float *x_zero, const int8_t *w_packed, const float *w_scale, const float *w_zero, int M, int K, int N, float alpha, float beta)
 {
     postKernel<Tdata>(y, y_packed, c, bias, x_packed, x_scale, x_zero, w_packed, w_scale, w_zero, M, K, N, alpha, beta);
 }
 template <typename Tdata>
 __global__ void post(
-    Tdata *y, int32_t *y_packed, const Tdata *c, const int8_t *x_packed, const Tdata *x_scale, const Tdata *x_zero, const int8_t *w_packed, const Tdata *w_scale, const Tdata *w_zero, int M, int K, int N, float alpha, float beta)
+    Tdata *y, int32_t *y_packed, const Tdata *c, const int8_t *x_packed, const float *x_scale, const float *x_zero, const int8_t *w_packed, const float *w_scale, const float *w_zero, int M, int K, int N, float alpha, float beta)
 {
     postKernel<Tdata>(y, y_packed, c, x_packed, x_scale, x_zero, w_packed, w_scale, w_zero, M, K, N, alpha, beta);
 }
 
 template <typename Tdata>
 __global__ void postSym(
-    Tdata *y, int32_t *y_packed, const Tdata *c, const Tdata *bias, const int8_t *x_packed, const Tdata *x_scale, const int8_t *w_packed, const Tdata *w_scale, int M, int K, int N, float alpha, float beta)
+    Tdata *y, int32_t *y_packed, const Tdata *c, const Tdata *bias, const int8_t *x_packed, const float *x_scale, const int8_t *w_packed, const float *w_scale, int M, int K, int N, float alpha, float beta)
 {
     postSymKernel<Tdata>(y, y_packed, c, bias, x_packed, x_scale, w_packed, w_scale, M, K, N, alpha, beta);
 }
 template <typename Tdata>
 __global__ void postSym(
-    Tdata *y, int32_t *y_packed, const Tdata *c, const int8_t *x_packed, const Tdata *x_scale, const int8_t *w_packed, const Tdata *w_scale, int M, int K, int N, float alpha, float beta)
+    Tdata *y, int32_t *y_packed, const Tdata *c, const int8_t *x_packed, const float *x_scale, const int8_t *w_packed, const float *w_scale, int M, int K, int N, float alpha, float beta)
 {
     postSymKernel<Tdata>(y, y_packed, c, x_packed, x_scale, w_packed, w_scale, M, K, N, alpha, beta);
 }
@@ -256,22 +256,22 @@ void launchKernel(void *y,
     {
         if (x_zero == nullptr && w_zero == nullptr)
         {
-            postSym<Tdata><<<grid_dim, block_dim, 0, stream>>>((Tdata *)y, y_packed, (Tdata *)c, (int8_t *)x_packed, (Tdata *)x_scale, (int8_t *)w_packed, (Tdata *)w_scale, M, K, N, alpha, beta);
+            postSym<Tdata><<<grid_dim, block_dim, 0, stream>>>((Tdata *)y, y_packed, (Tdata *)c, (int8_t *)x_packed, (float *)x_scale, (int8_t *)w_packed, (float *)w_scale, M, K, N, alpha, beta);
         }
         else
         {
-            post<Tdata><<<grid_dim, block_dim, 0, stream>>>((Tdata *)y, y_packed, (Tdata *)c, (int8_t *)x_packed, (Tdata *)x_scale, (Tdata *)x_zero, (int8_t *)w_packed, (Tdata *)w_scale, (Tdata *)w_zero, M, K, N, alpha, beta);
+            post<Tdata><<<grid_dim, block_dim, 0, stream>>>((Tdata *)y, y_packed, (Tdata *)c, (int8_t *)x_packed, (float *)x_scale, (float *)x_zero, (int8_t *)w_packed, (float *)w_scale, (float *)w_zero, M, K, N, alpha, beta);
         }
     }
     else
     {
         if (x_zero == nullptr && w_zero == nullptr)
         {
-            postSym<Tdata><<<grid_dim, block_dim, 0, stream>>>((Tdata *)y, y_packed, (Tdata *)c, (Tdata *)bias, (int8_t *)x_packed, (Tdata *)x_scale, (int8_t *)w_packed, (Tdata *)w_scale, M, K, N, alpha, beta);
+            postSym<Tdata><<<grid_dim, block_dim, 0, stream>>>((Tdata *)y, y_packed, (Tdata *)c, (Tdata *)bias, (int8_t *)x_packed, (float *)x_scale, (int8_t *)w_packed, (float *)w_scale, M, K, N, alpha, beta);
         }
         else
         {
-            post<Tdata><<<grid_dim, block_dim, 0, stream>>>((Tdata *)y, y_packed, (Tdata *)c, (Tdata *)bias, (int8_t *)x_packed, (Tdata *)x_scale, (Tdata *)x_zero, (int8_t *)w_packed, (Tdata *)w_scale, (Tdata *)w_zero, M, K, N, alpha, beta);
+            post<Tdata><<<grid_dim, block_dim, 0, stream>>>((Tdata *)y, y_packed, (Tdata *)c, (Tdata *)bias, (int8_t *)x_packed, (float *)x_scale, (float *)x_zero, (int8_t *)w_packed, (float *)w_scale, (float *)w_zero, M, K, N, alpha, beta);
         }
     }
     cudaFree(y_packed);

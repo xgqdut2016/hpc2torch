@@ -100,7 +100,7 @@ def computeQuant(
         x_zero_ptr = ctypes.cast(x_zero.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     
     if device == "cuda":
-        lib.quant_nv.argtypes = [
+        lib.PerChannelQuantI8_nv.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -109,7 +109,7 @@ def computeQuant(
             ctypes.c_int,
             ctypes.c_int
         ]
-        lib.quant_nv(x_packed_ptr, x_scale_ptr, x_zero_ptr, x_ptr, M, K, byteSize)
+        lib.PerChannelQuantI8_nv(x_packed_ptr, x_scale_ptr, x_zero_ptr, x_ptr, M, K, byteSize)
     return x_packed, x_scale, x_zero
 def test(
     x_shape,
