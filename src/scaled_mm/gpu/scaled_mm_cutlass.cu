@@ -1,7 +1,9 @@
-#if defined ENABLE_NVIDIA_API
-#include "int8_gemm_kernel.cuh"
 #include <type_traits>
 #include <string>
+#include <cublas_v2.h>
+#include "per_channel_dequant_int8.cuh"
+#if defined ENABLE_NVIDIA_API
+#include "int8_gemm_kernel.cuh"
 
 inline int getSMVersion()
 {
@@ -13,6 +15,7 @@ inline int getSMVersion()
     cudaDeviceGetAttribute(&sm_minor, cudaDevAttrComputeCapabilityMinor, device);
     return sm_major * 10 + sm_minor;
 }
+#endif
 
 template <typename Tdata>
 void int8calculate(
@@ -32,7 +35,7 @@ void int8calculate(
         printf("cudaStreamCreate failed: %s\n", cudaGetErrorString(err));
         return;
     }
-
+#if defined ENABLE_NVIDIA_API
     auto sm_version = getSMVersion();
     if (sm_version >= 75 && sm_version < 80)
     {
@@ -104,6 +107,47 @@ void int8calculate(
         }
 #endif
     }
+#elif defined ENABLE_QL_API
+    cublasHandle_t handle; // cublas句柄
+    cublasCreate(&handle); // 初始化句柄
+    int32_t *y_packed;
+    cudaMalloc((void **)&y_packed, M * N * sizeof(int32_t));
+    const int32_t alpha_I = 1;
+    const int32_t beta_I = 0;
+
+    cublasGemmEx(
+        handle,
+        CUBLAS_OP_T, // A = b^T : [N, K]
+        CUBLAS_OP_N, // B = a^T viewed column-major : [K, M]
+        N,           // m
+        M,           // n
+        K,           // k
+        &alpha_I,
+        b, CUDA_R_8I, lda,
+        a, CUDA_R_8I, ldb,
+        &beta_I,
+        y_packed, CUDA_R_32I, ldo,
+        CUBLAS_COMPUTE_32I,
+        CUBLAS_GEMM_DEFAULT);
+
+    constexpr unsigned int BLOCK_SIZE_x = 32;
+    constexpr unsigned int BLOCK_SIZE_y = 32;
+
+    int num_block_x = (N + BLOCK_SIZE_x - 1) / BLOCK_SIZE_x;
+    int num_block_y = (M + BLOCK_SIZE_y - 1) / BLOCK_SIZE_y;
+    dim3 block_dim(BLOCK_SIZE_x, BLOCK_SIZE_y, 1);
+    dim3 grid_dim(num_block_x, num_block_y, 1);
+    if (bias == nullptr)
+    {
+        postSym<Tdata><<<grid_dim, block_dim, 0, stream>>>((Tdata *)out, y_packed, a, a_scale, b, b_scale, M, K, N);
+    }
+    else
+    {
+        postSym<Tdata><<<grid_dim, block_dim, 0, stream>>>((Tdata *)out, y_packed, (Tdata *)bias, a, a_scale, b, b_scale, M, K, N);
+    }
+    cublasDestroy(handle);
+    cudaFree(y_packed);
+#endif
     // 同步
     err = cudaStreamSynchronize(stream);
     if (err != cudaSuccess)
@@ -124,7 +168,7 @@ extern "C" void int8_scaled_gemm_cutlass(
     const void *bias,
     const void *x_packed,
     const void *x_scale,
-    const void *w_packed,
+    const void *w_packed, // 按照列主元优先排布
     const void *w_scale,
     int M, int K, int N,
     int dataType)
@@ -161,4 +205,3 @@ extern "C" void int8_scaled_gemm_cutlass(
         break;
     }
 }
-#endif
