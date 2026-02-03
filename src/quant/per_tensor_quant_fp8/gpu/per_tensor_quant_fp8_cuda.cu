@@ -16,7 +16,7 @@ __device__ void
 per_tensor_absmax_kernel(const T *__restrict__ input, float *__restrict__ output_s, const int64_t num_elements)
 {
 #ifdef ENABLE_NVIDIA_API
-    float max_value = 0.0f;
+    float max_value = -__FLT_MAX__;
     unsigned int tid = threadIdx.x;
     unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
     const int grid_size = blockDim.x * gridDim.x;
@@ -53,20 +53,20 @@ per_tensor_absmax_kernel(const T *__restrict__ input, float *__restrict__ output
         atomicMaxFloat(output_s, max_value / FP8_E4M3_MAX);
     }
 #elif defined ENABLE_QL_API
-    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    typedef cub::BlockReduce<float, BLOCK_SIZE> BlockReduce;
-    __shared__ typename BlockReduce::TempStorage temp_storage;
+    unsigned int tid = threadIdx.x;
+    unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int grid_size = blockDim.x * gridDim.x;
 
     // ---- 2. reduce min ----
     float thread_max = -__FLT_MAX__;
-    for (int ind = threadIdx.x; ind < num_elements; ind += BLOCK_SIZE)
+    for (int ind = gid; ind < num_elements; ind += grid_size)
     {
-        thread_max = fmaxf(thread_max, fabs((float)input[ind]));
+        thread_max = fmaxf(thread_max, fabsf((float)input[ind]));
     }
-    float local_max = BlockReduce(temp_storage).Reduce(thread_max, cub::Max());
+    float local_max = blockReduceMax(thread_max);
     if (tid == 0)
     {
-        output_s[0] = local_max / FP8_E4M3_MAX;
+        atomicMaxFloat(output_s, local_max / FP8_E4M3_MAX);
     }
 #endif
 }
@@ -124,10 +124,11 @@ __device__ void per_tensor_quant_fp8_kernel(
 #endif
     }
 #elif defined ENABLE_QL_API
-    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int gid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int grid_size = blockDim.x * gridDim.x;
     const float scale_val = 1.0f / scale[0];
 
-    if (tid < num_elements)
+    for (int tid = gid; tid < num_elements; tid += grid_size)
     {
         float val = fmax(-FP8_E4M3_MAX, fmin(static_cast<float>(input[tid]) * scale_val, FP8_E4M3_MAX));
 #if !defined(USE_ROCM) || defined(HIP_FP8_TYPE_E4M3)
@@ -164,13 +165,19 @@ void __global__ blockPerTensorQuantF8Sym(
 template <unsigned int BLOCK_SIZE, typename Tdata>
 void PerTensorQuantF8Kernel(void *x_packed, void *x_scale, void *x_zero, const void *x, uint64_t num_elements, bool is_static)
 {
-
+    cudaStream_t stream = nullptr;
+    cudaError_t err = cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
+    if (err != cudaSuccess)
+    {
+        printf("cudaStreamCreate failed: %s\n", cudaGetErrorString(err));
+        return;
+    }
 #ifdef ENABLE_NVIDIA_API
     constexpr unsigned int block_size = 256;
 #else
     constexpr unsigned int block_size = BLOCK_SIZE;
 #endif
-    int num_blocks = (static_cast<int>(num_elements) + block_size - 1) / block_size;
+    int num_blocks = min((static_cast<int>(num_elements) + block_size - 1) / block_size, 1024);
 
     dim3 grid(num_blocks);
     dim3 block(block_size);
@@ -179,11 +186,18 @@ void PerTensorQuantF8Kernel(void *x_packed, void *x_scale, void *x_zero, const v
         if (is_static == false)
         {
             blockPerTensorAbsmaxSym<Tdata, block_size>
-                <<<grid, block>>>((float *)x_scale, (Tdata *)x, num_elements);
+                <<<grid, block, 0, stream>>>((float *)x_scale, (Tdata *)x, num_elements);
         }
         blockPerTensorQuantF8Sym<Tdata, __nv_fp8_e4m3, block_size>
-            <<<grid, block>>>((__nv_fp8_e4m3 *)x_packed, (float *)x_scale, (Tdata *)x, num_elements);
+            <<<grid, block, 0, stream>>>((__nv_fp8_e4m3 *)x_packed, (float *)x_scale, (Tdata *)x, num_elements);
     }
+    err = cudaStreamSynchronize(stream);
+    if (err != cudaSuccess)
+    {
+        printf("cudaStreamSynchronize failed: %s\n", cudaGetErrorString(err));
+    }
+
+    cudaStreamDestroy(stream);
 }
 
 extern "C" void PerTensorQuantF8_nv(void *x_packed, void *x_scale, void *x_zero, const void *x, int num_elements, bool is_static, int byteSize)
