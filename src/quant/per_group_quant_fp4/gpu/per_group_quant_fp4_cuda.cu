@@ -1,7 +1,7 @@
 #ifndef __PER_GROUP_QUANT_FP4_KERNEL_CUH__
 #define __PER_GROUP_QUANT_FP4_KERNEL_CUH__
 #include "kernel.cuh"
-#if defined ENABLE_NVIDIA_API
+
 // Use UE4M3 by default.
 template <class Type, bool UE8M0_SF = false>
 __global__ void
@@ -91,8 +91,6 @@ inline int getMultiProcessorCount()
     return multi_processor_count; // Return the cached value on subsequent calls
 }
 
-#endif
-
 template <unsigned int BLOCK_SIZE, typename Tdata>
 void PerGroupQuantF4Kernel(int64_t *output, int32_t *output_scale, const Tdata *input, const float *input_global_scale, int M, int N)
 {
@@ -104,11 +102,10 @@ void PerGroupQuantF4Kernel(int64_t *output, int32_t *output_scale, const Tdata *
         return;
     }
 
-#if defined ENABLE_NVIDIA_API
     bool useUE8M0 = false;
     int multiProcessorCount = getMultiProcessorCount();
     invokeFP4Quantization(M, N, input, input_global_scale, output, output_scale, useUE8M0, multiProcessorCount, stream);
-#endif
+
     err = cudaStreamSynchronize(stream);
     if (err != cudaSuccess)
     {

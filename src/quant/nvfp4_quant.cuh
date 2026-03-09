@@ -15,31 +15,38 @@ limitations under the License.
 
 #include <cuda.h>
 #include <cuda_fp8.h>
+#ifdef ENABLE_NVIDIA_API
 #include <cutlass/arch/config.h>
+#endif
 
 // Get type2 from type or vice versa (applied to half and bfloat16)
 template <typename T>
-struct TypeConverter {
+struct TypeConverter
+{
     using Type = half2;
 }; // keep for generality
 
 template <>
-struct TypeConverter<half2> {
+struct TypeConverter<half2>
+{
     using Type = half;
 };
 
 template <>
-struct TypeConverter<half> {
+struct TypeConverter<half>
+{
     using Type = half2;
 };
 
 template <>
-struct TypeConverter<__nv_bfloat162> {
+struct TypeConverter<__nv_bfloat162>
+{
     using Type = __nv_bfloat16;
 };
 
 template <>
-struct TypeConverter<__nv_bfloat16> {
+struct TypeConverter<__nv_bfloat16>
+{
     using Type = __nv_bfloat162;
 };
 
@@ -48,18 +55,22 @@ struct TypeConverter<__nv_bfloat16> {
 constexpr int CVT_FP4_ELTS_PER_THREAD = 8;
 constexpr int CVT_FP4_SF_VEC_SIZE = 16;
 
-__device__ inline uint8_t fp32_to_e2m1_function(float f) {
+__device__ inline uint8_t fp32_to_e2m1_function(float f)
+{
     uint32_t sign = 0;
-    if (f < 0) {
+    if (f < 0)
+    {
         sign = 0x8;
         f = -f;
     }
 
     // 处理特殊值
-    if (isinf(f)) {
+    if (isinf(f))
+    {
         return sign | 0x7;
     }
-    if (isnan(f)) {
+    if (isnan(f))
+    {
         return sign | 0xF;
     }
 
@@ -67,32 +78,40 @@ __device__ inline uint8_t fp32_to_e2m1_function(float f) {
     f = fminf(f, 6.0f);
 
     // 通过比较直接映射到最近的E2M1值
-    if (f < 0.25f) {
+    if (f < 0.25f)
+    {
         return sign | 0x0; // 0
     }
-    if (f < 0.75f) {
+    if (f < 0.75f)
+    {
         return sign | 0x1; // 0.5
     }
-    if (f < 1.25f) {
+    if (f < 1.25f)
+    {
         return sign | 0x2; // 1.0
     }
-    if (f < 1.75f) {
+    if (f < 1.75f)
+    {
         return sign | 0x3; // 1.5
     }
-    if (f < 2.5f) {
+    if (f < 2.5f)
+    {
         return sign | 0x4; // 2.0
     }
-    if (f < 3.5f) {
+    if (f < 3.5f)
+    {
         return sign | 0x5; // 3.0
     }
-    if (f < 5.0f) {
+    if (f < 5.0f)
+    {
         return sign | 0x6; // 4.0
     }
     return sign | 0x7; // 6.0
 }
 
 // Convert 8 float32 values into 8 e2m1 values (represented as one uint32_t).
-inline __device__ uint32_t fp32_vec_to_e2m1(float (&array)[8]) {
+inline __device__ uint32_t fp32_vec_to_e2m1(float (&array)[8])
+{
     // PTX instructions used here requires >= sm100f.
 #if CUTLASS_ARCH_MMA_SM100A_ENABLED || CUTLASS_ARCH_MMA_SM103A_ENABLED || CUTLASS_ARCH_MMA_SM120A_ENABLED || (defined(__CUDA_ARCH_FAMILY_SPECIFIC__) && (__CUDA_ARCH_FAMILY_SPECIFIC__ > 1000))
     uint32_t val;
@@ -122,7 +141,8 @@ inline __device__ uint32_t fp32_vec_to_e2m1(float (&array)[8]) {
     uint32_t val = 0;
 
 #pragma unroll
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 8; i++)
+    {
         uint8_t e2m1_val = fp32_to_e2m1_function(array[i]);
         val |= (e2m1_val << (i * 4));
     }
@@ -132,7 +152,8 @@ inline __device__ uint32_t fp32_vec_to_e2m1(float (&array)[8]) {
 }
 
 // Convert 4 float2 values into 8 e2m1 values (represented as one uint32_t).
-inline __device__ uint32_t fp32_vec_to_e2m1(float2 (&array)[4]) {
+inline __device__ uint32_t fp32_vec_to_e2m1(float2 (&array)[4])
+{
     // PTX instructions used here requires >= sm100f.
 #if CUTLASS_ARCH_MMA_SM100A_ENABLED || CUTLASS_ARCH_MMA_SM103A_ENABLED || CUTLASS_ARCH_MMA_SM120A_ENABLED || (defined(__CUDA_ARCH_FAMILY_SPECIFIC__) && (__CUDA_ARCH_FAMILY_SPECIFIC__ > 1000))
     uint32_t val;
@@ -186,21 +207,33 @@ inline __device__ uint32_t fp32_vec_to_e2m1(float2 (&array)[4]) {
 }
 
 // Fast reciprocal.
-inline __device__ float reciprocal_approximate_ftz(float a) {
+inline __device__ float reciprocal_approximate_ftz(float a)
+{
+#if defined(ENABLE_NVIDIA_API)
     float b;
-    asm volatile("rcp.approx.ftz.f32 %0, %1;\n" : "=f"(b) : "f"(a));
+    asm volatile(
+        "rcp.approx.ftz.f32 %0, %1;\n"
+        : "=f"(b)
+        : "f"(a));
     return b;
+#elif defined(ENABLE_QL_API)
+    return 1.0f / a;
+#else
+    return 1.0f / a;
+#endif
 }
 
 template <class SFType, int CVT_FP4_NUM_THREADS_PER_SF>
-__device__ uint8_t *cvt_quant_to_fp4_get_sf_out_offset(int rowIdx, int colIdx, int numCols, SFType *SFout) {
+__device__ uint8_t *cvt_quant_to_fp4_get_sf_out_offset(int rowIdx, int colIdx, int numCols, SFType *SFout)
+{
 
     static_assert(CVT_FP4_NUM_THREADS_PER_SF == 1 || CVT_FP4_NUM_THREADS_PER_SF == 2);
 
     // One pair of threads write one SF to global memory.
     // TODO: stage through smem for packed STG.32
     // is it better than STG.8 from 4 threads ?
-    if (threadIdx.x % CVT_FP4_NUM_THREADS_PER_SF == 0) {
+    if (threadIdx.x % CVT_FP4_NUM_THREADS_PER_SF == 0)
+    {
         // SF vector index (16 elements share one SF in the K dimension).
         int32_t kIdx = colIdx / CVT_FP4_NUM_THREADS_PER_SF;
         int32_t mIdx = rowIdx;
@@ -237,12 +270,13 @@ __device__ uint8_t *cvt_quant_to_fp4_get_sf_out_offset(int rowIdx, int colIdx, i
 
 // Define a 16 bytes packed data type.
 template <class Type>
-struct PackedVec {
+struct PackedVec
+{
     typename TypeConverter<Type>::Type elts[4];
 };
 
 template <>
-struct PackedVec<__nv_fp8_e4m3> {
+struct PackedVec<__nv_fp8_e4m3>
+{
     __nv_fp8x2_e4m3 elts[8];
 };
-

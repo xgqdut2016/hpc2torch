@@ -171,9 +171,6 @@ def test(
     scale_ans = recover_swizzled_scales(output_scale.view(torch.float8_e4m3fn), M, N)
     out_ans = cast_from_fp4(output, M, N)
 
-    assert (torch.allclose(out_ans, out_ref, atol=atol, rtol=rtol) and 
-                torch.allclose(scale_ans, scale_ref, atol=atol, rtol=rtol))
-
     tmpa_out = out_ans.float().detach().to('cpu').numpy().flatten()
     tmpb_out = out_ref.float().to('cpu').detach().numpy().flatten()
     tmpa_scale = scale_ans.float().detach().to('cpu').numpy().flatten()
@@ -188,6 +185,10 @@ def test(
     rtol_scale = atol_scale / (max(abs(tmpb_scale)) + 1e-8)
     print("scale absolute error:%.4e"%(atol_scale))
     print("scale relative error:%.4e"%(rtol_scale))
+
+    assert (torch.allclose(out_ans, out_ref, atol=atol, rtol=rtol) and 
+                torch.allclose(scale_ans, scale_ref, atol=atol, rtol=rtol))
+
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="Test per group quant fp4 on different devices.")
