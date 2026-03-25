@@ -1,8 +1,23 @@
 # ========================
-# source_ql.cmake
+# source_ql.cmake （已自动集成 PyTorch 依赖）
 # ========================
 
 message(STATUS "Configuring DLCC (QL) CUDA backend")
+
+# ------------------------
+# 1. 自动获取 PyTorch 路径（关键！不写死路径）
+# ------------------------
+execute_process(
+    COMMAND python -c "import torch, os; print(os.path.dirname(torch.__file__))"
+    OUTPUT_VARIABLE TORCH_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+set(TORCH_INCLUDE ${TORCH_DIR}/include)
+set(TORCH_LIB ${TORCH_DIR}/lib)
+
+message(STATUS "✅ 自动找到 PyTorch 路径: ${TORCH_DIR}")
+message(STATUS "✅ PyTorch 头文件: ${TORCH_INCLUDE}")
+message(STATUS "✅ PyTorch 库路径: ${TORCH_LIB}")
 
 # ------------------------
 # 编译宏
@@ -37,7 +52,7 @@ file(GLOB_RECURSE QL_CPP_SRC
 set(PROJECT_QL_CPP_SOURCES ${QL_CPP_SRC})
 
 # ------------------------
-# 编译 .cu -> .o
+# 编译 .cu -> .o （已自动加入 PyTorch 头文件！）
 # ------------------------
 set(QL_CU_OBJECTS "")
 
@@ -60,7 +75,9 @@ foreach(cu ${QL_CUDA_SRC})
             --offload-arch=${DLCC_ARCH},dlgpux64
             -I${PROJECT_SOURCE_DIR}/include
             -I${CUTLASS_INCLUDE}
-            -I${DLCC_CUDA_PATH}/include   # ✅ 这里加上 cudnn.h 所在 include
+            -I${DLCC_CUDA_PATH}/include
+            -I${TORCH_INCLUDE}          # ✅ 自动加 PyTorch 头文件
+            -I${TORCH_INCLUDE}/torch/csrc/api/include  # ✅ 关键头文件
             -O2 -std=c++17 -fPIC
             -mllvm -dlgpu-lower-xtpvn=true
         DEPENDS ${cu}
@@ -75,10 +92,20 @@ endforeach()
 add_custom_target(ql_cuda_objs ALL DEPENDS ${QL_CU_OBJECTS})
 
 # ------------------------
-# 链接库
+# 链接库（已自动加入 PyTorch 所有依赖库）
 # ------------------------
 set(QL_LINK_LIBS
     ${DLCC_CUDA_PATH}/lib/libcurt.so
     ${DLCC_CUDA_PATH}/lib/libcublas.so
     ${DLCC_CUDA_PATH}/lib/libcudnn.so
+
+    # ✅ 自动链接 PyTorch 库（解决你所有 undefined symbol 问题！）
+    ${TORCH_LIB}/libtorch.so
+    ${TORCH_LIB}/libtorch_cpu.so
+    ${TORCH_LIB}/libtorch_cuda.so
+    ${TORCH_LIB}/libc10.so
+    ${TORCH_LIB}/libc10_cuda.so
+    ${TORCH_LIB}/libtorch_python.so
 )
+
+message(STATUS "✅ 已自动链接 PyTorch 所有库: ${QL_LINK_LIBS}")
