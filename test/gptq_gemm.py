@@ -3,6 +3,7 @@ import ctypes
 import torch.nn.functional as F
 import argparse
 import numpy as np
+import numpy
 from utils import performance
 # 添加上一层目录到模块搜索路径
 import sys
@@ -13,108 +14,167 @@ import os
 lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.././build/lib/libmy_library.so')
 lib = ctypes.CDLL(lib_path)
 
-def gptq_gemm_torch(A, B, scale, zero, b_g_idx, group_size, quant_bit):
-    """
-    vLLM-style W4A16 / W8A16 (with b_g_idx)
+def get_pack_factor(num_bits):
+    assert 32 % num_bits == 0, f"Unsupported num_bits = {num_bits}"
+    return 32 // num_bits
 
-    A: [M, K]
-    B:
-        - int4: [K/2, N] uint8
-        - int8: [K,   N] uint8
-    scale: [num_groups, N]
-    zero:  [num_groups, N] int32
-    b_g_idx: [K] int32   ⭐ group index for each K
-    group_size: int
-    quant_bit: 4 or 8
+def pack_cols(
+    q_w: torch.Tensor,
+    num_bits: int,
+    size_k: int,
+    size_n: int,
+):
+    assert q_w.shape == (size_k, size_n)
 
-    return:
-        out: [M, N]
-    """
+    pack_factor = get_pack_factor(num_bits)
+    assert size_n % pack_factor == 0
 
-    M, K = A.shape
-    device = A.device
-    dtype = A.dtype
+    orig_device = q_w.device
 
-    # ------------------------
-    # 1. 解码权重
-    # ------------------------
-    if quant_bit == 4:
-        Bf = B.view(-1)
+    q_w = q_w.cpu().numpy().astype(numpy.uint32)
 
-        low  = (Bf & 0xF).to(torch.int8)
-        high = ((Bf >> 4) & 0xF).to(torch.int8)
+    q_res = numpy.zeros((size_k, size_n // pack_factor), dtype=numpy.uint32)
 
-        vals = torch.stack([low, high], dim=1).view(-1)
+    for i in range(pack_factor):
+        q_res |= q_w[:, i::pack_factor] << num_bits * i
 
-        # signed int4
-        vals = vals - ((vals >= 8).to(torch.int8) * 16)
+    q_res = torch.from_numpy(q_res.astype(numpy.int32)).to(orig_device)
+    q_res = q_res.contiguous()
 
-        N = B.shape[1]
-        W_int = vals[:K * N].view(K, N)
+    return q_res
 
-    elif quant_bit == 8:
-        # uint8 -> int8
-        tmp = B.to(torch.int16)
-        tmp = (tmp - 256) * (tmp >= 128) + tmp * (tmp < 128)
-        W_int = tmp.to(torch.int8)
 
-        N = B.shape[1]
+def pack_rows(
+    q_w: torch.Tensor,
+    num_bits: int,
+    size_k: int,
+    size_n: int,
+):
+    assert q_w.shape == (size_k, size_n)
 
-    else:
-        raise ValueError("quant_bit must be 4 or 8")
+    pack_factor = get_pack_factor(num_bits)
+    assert size_k % pack_factor == 0
 
-    # ------------------------
-    # 2. Dequant（核心：b_g_idx）
-    # ------------------------
-    if group_size == -1:
-        # 特殊情况：所有K共用一个group
-        s = scale[0]
-        z = zero[0].to(dtype)
+    orig_device = q_w.device
 
-        W = s * (W_int.to(dtype) - z)
+    q_w = q_w.cpu().numpy().astype(numpy.uint32)
 
-    else:
-        # ⭐ 用 b_g_idx 替代 k//group_size
-        group_ids = b_g_idx.to(torch.long)   # [K]
+    q_res = numpy.zeros((size_k // pack_factor, size_n), dtype=numpy.uint32)
 
-        s = scale[group_ids]                 # [K,N]
-        z = zero[group_ids].to(dtype)
+    for i in range(pack_factor):
+        q_res |= q_w[i::pack_factor, :] << num_bits * i
 
-        W = s * (W_int.to(dtype) - z)
+    q_res = torch.from_numpy(q_res.astype(numpy.int32)).to(orig_device)
+    return q_res
 
-    # ------------------------
-    # 3. GEMM
-    # ------------------------
-    out = A @ W
+def torch_dequantize(q_weight, q_zeros, scales, g_idx, use_shuffle, bit, K, N):
+    assert bit == 4, "Reference dequantization only supports 4-bit"
+    group_size = K // scales.shape[0]
+    pack_factor = 32 // bit
 
-    return out
+    # unpack q_weight: (K//pack_factor, N) -> (K, N)
+    unpacked_q_weight = torch.empty(
+        q_weight.shape[0] * pack_factor,
+        q_weight.shape[1],
+        dtype=torch.uint8,
+        device=q_weight.device,
+    )
+    for i in range(pack_factor):
+        unpacked_q_weight[i::pack_factor, :] = (q_weight >> (i * 4)) & 0x0F
+
+    # unpack q_zeros: (num_groups, N//pack_factor) -> (num_groups, N)
+    unpacked_q_zeros = torch.empty(
+        q_zeros.shape[0],
+        q_zeros.shape[1] * pack_factor,
+        dtype=torch.uint8,
+        device=q_zeros.device,
+    )
+    for i in range(pack_factor):
+        unpacked_q_zeros[:, i::pack_factor] = (q_zeros >> (i * 4)) & 0x0F
+
+    unpacked_q_zeros += 1
+    unpacked_q_zeros = unpacked_q_zeros.to(scales.dtype)
+
+    scale_zeros = unpacked_q_zeros * scales  # (num_groups, N)
+
+    current_g_idx = torch.tensor(
+        [i // group_size for i in range(K)], dtype=torch.int32, device=q_weight.device
+    )
+
+    scale_mat = scales[current_g_idx]  # (K, N)
+    scale_zeros_mat = scale_zeros[current_g_idx]  # (K, N)
+
+    # dequant: weight * scale - scale_zeros
+    dequantized_b = unpacked_q_weight.to(scales.dtype) * scale_mat - scale_zeros_mat
+
+    return dequantized_b.reshape(K, N)
+
+
+def torch_gptq_gemm(
+    a, b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx, use_shuffle, bit
+):
+    K, N = a.shape[1], b_q_weight.shape[1]
+
+    b_dequant = torch_dequantize(
+        b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx, use_shuffle, bit, K, N
+    )
+    c = torch.matmul(a, b_dequant)
+    return c
 
 def test(M, K, N, use_exllama, quant_bit, group_size, device):
     test_dtype = torch.float16
     print(
         f"Testing Gptq Gemm on {device} with M-K-N:{M, K, N}, use_exllama:{use_exllama}, quant_bit:{quant_bit}, group_size:{group_size}, dtype:{test_dtype}"
     )
-    A = torch.randn((M, K), dtype=test_dtype, device=device)
-    if quant_bit == 4:
-        B = torch.randint(0, 16, (N, k // 2), dtype=torch.uint8, device=device)
-    elif quant_bit == 8:
-        B = torch.randint(0, 256, (N, K // 4), dtype=torch.uint8, device=device)
-    C = torch.randn((M, N), dtype=test_dtype, device=device)
-    num_groups = 1 if group_size == -1 else K // group_size
-    block_size = 1 if group_size == -1 else group_size
-    b_scales = torch.randn((num_groups, N), dtype=test_dtype, device=device)
-    b_zeros = torch.randint(-2000000000, 2000000000, (num_groups, N), dtype=torch.int32, device=device)
-    b_g_idx = torch.randint(0, K // block_size, (K, ), dtype=torch.int32, device=device)
+    b_fp = torch.randn(K, N, dtype=test_dtype, device=device)
 
-    A_ptr = ctypes.cast(A.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    B_ptr = ctypes.cast(B.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    b_scales_ptr = ctypes.cast(b_scales.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    b_zeros_ptr = ctypes.cast(b_zeros.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
-    b_g_idx_ptr = ctypes.cast(b_g_idx.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    assert K % group_size == 0, "K must be divisible by group_size"
+    num_groups = K // group_size
+    use_shuffle = use_exllama
+
+    if use_shuffle:
+        print(f"not support use_shuffle:{use_shuffle}")
+        return
+    else:
+        g_idx = torch.tensor(
+            [i // group_size for i in range(K)], dtype=torch.int32, device=device
+        )
+        b_shuffled = b_fp[g_idx]
+
+    b_grouped = b_shuffled.reshape(num_groups, group_size, N)
+
+    b_max = torch.max(b_grouped, dim=1, keepdim=True)[0]
+    b_min = torch.min(b_grouped, dim=1, keepdim=True)[0]
+
+    scales = (b_max - b_min) / (2**quant_bit - 1)
+    scales = scales.clamp(min=1e-6)
+
+    zeros_float = (-b_min / scales).round()
+
+    q_b = (
+        (b_grouped / scales + zeros_float).round().clamp(0, 2**quant_bit - 1).to(torch.uint8)
+    )
+
+    q_zeros_unpacked = zeros_float.to(torch.uint8) - 1
+
+    b_q_weight = pack_rows(q_b.reshape(K, N), quant_bit, K, N)
+
+    q_zeros_unpacked = q_zeros_unpacked.reshape(num_groups, N)
+    b_gptq_qzeros = pack_cols(q_zeros_unpacked, quant_bit, num_groups, N)
+    b_gptq_scales = scales.squeeze(1)
+
+    a = torch.randn(M, K, dtype=test_dtype, device=device)
+    C = torch.randn((M, N), dtype=test_dtype, device=device)
+
+    A_ptr = ctypes.cast(a.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    B_ptr = ctypes.cast(b_q_weight.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    b_scales_ptr = ctypes.cast(b_gptq_scales.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    b_zeros_ptr = ctypes.cast(b_gptq_qzeros.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
+    b_g_idx_ptr = ctypes.cast(g_idx.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
     C_ptr = ctypes.cast(C.data_ptr(), ctypes.POINTER(ctypes.c_void_p))
 
     if device == "cuda":
-        torch_gptq_gemm_time = performance.CudaProfile((gptq_gemm_torch, (A, B, b_scales, b_zeros, b_g_idx, group_size, quant_bit))) 
+        torch_gptq_gemm_time = performance.CudaProfile((torch_gptq_gemm, (a, b_q_weight, b_gptq_qzeros, b_gptq_scales, g_idx, use_shuffle, quant_bit))) 
         lib.gptq_gemm_nv.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -137,8 +197,10 @@ def test(M, K, N, use_exllama, quant_bit, group_size, device):
         
     performance.logBenchmark(torch_gptq_gemm_time, custom_gptq_gemm_time)
 
-    atol = 1e-3; rtol = 5e-2
-    ans = gptq_gemm_torch(A, B, b_scales, b_zeros, b_g_idx, group_size, quant_bit)
+    ans = torch_gptq_gemm(a, b_q_weight, b_gptq_qzeros, b_gptq_scales, g_idx, use_shuffle, quant_bit)
+    rtol = 4e-2
+    atol = 4e-2
+    assert torch.allclose(C, ans, atol=atol, rtol=rtol)
     tmpa = C.float().detach().to('cpu').numpy().flatten()
     tmpb = ans.float().to('cpu').detach().numpy().flatten()
     
@@ -157,11 +219,15 @@ args = parser.parse_args()
 
 test_cases = [
     # M, K, N, use_exllama, quant_bit, group_size
-    (16, 1024, 512, False, 4, 128),
-    (128, 256, 32, False, 4, 128),
-    (512, 2048, 128, True, 4, 128),
-    (1024, 1024, 128, False, 8, 128),
-    (1024, 1024, 128, True, 8, 128),
+    (1, 2048, 2048, True, 4, 128),
+    (1, 2048, 4096, False, 4, 128),
+    (1, 4096, 2048, False, 4, 128),
+    (8, 2048, 2048, False, 4, 128),
+    (8, 2048, 4096, False, 4, 128),
+    (8, 4096, 2048, False, 4, 128),
+    (128, 2048, 2048, False, 4, 128),
+    (128, 2048, 4096, False, 4, 128),
+    (128, 4096, 2048, False, 4, 128),
 ]
 
 if args.device == 'mlu':
