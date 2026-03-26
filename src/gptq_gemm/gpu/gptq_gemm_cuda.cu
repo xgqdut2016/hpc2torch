@@ -1896,6 +1896,7 @@ void GptqGemmKernel(void *c, const void *a, const void *b,
         num_groups,
         use_exllama, bit);
     cublasDestroy(handle); // 销毁句柄，释放资源
+    cudaFree(temp_dq);
 }
 
 // void gptq_shuffle(torch::Tensor q_weight, torch::Tensor q_perm, int64_t bit) {

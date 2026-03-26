@@ -193,7 +193,7 @@ def test(M, K, N, use_exllama, quant_bit, group_size, device):
         
         custom_gptq_gemm_time = \
         performance.CudaProfile((lib.gptq_gemm_nv, (
-                      C_ptr, A_ptr, B_ptr, b_scales_ptr, b_zeros_ptr, b_g_idx_ptr, M, K, N, num_groups, K //2, use_exllama, quant_bit)))
+                      C_ptr, A_ptr, B_ptr, b_scales_ptr, b_zeros_ptr, b_g_idx_ptr, M, K, N, num_groups, b_q_weight.shape[0], use_exllama, quant_bit)))
         
     performance.logBenchmark(torch_gptq_gemm_time, custom_gptq_gemm_time)
 
