@@ -30,6 +30,33 @@ set(IS_TECO OFF)
 # ========================
 # CUDA / DLCC / NVIDIA
 # ========================
+# ------------------------
+# 支持用户传入 --cuda_arch=sm_90a
+# ------------------------
+set(USER_CUDA_ARCH "" CACHE STRING "CUDA arch like sm_80, sm_90a")
+
+if(USER_CUDA_ARCH)
+    message(STATUS "✅ User specified CUDA arch: ${USER_CUDA_ARCH}")
+
+    # 提取数字部分，例如 sm_90a -> 90
+    string(REGEX MATCH "[0-9]+" CUDA_ARCH_NUM ${USER_CUDA_ARCH})
+
+    if(NOT CUDA_ARCH_NUM)
+        message(FATAL_ERROR "Invalid --cuda_arch format: ${USER_CUDA_ARCH}")
+    endif()
+
+    set(CUDA_ARCH ${CUDA_ARCH_NUM})
+else()
+    # 默认
+    set(CUDA_ARCH 80)
+endif()
+
+# 计算 SGL_CUDA_ARCH = major*100 + minor*10
+math(EXPR SGL_CUDA_ARCH "${CUDA_ARCH} * 10")
+
+message(STATUS "✅ CUDA_ARCH = ${CUDA_ARCH}")
+message(STATUS "✅ SGL_CUDA_ARCH = ${SGL_CUDA_ARCH}")
+
 if(USE_CUDA)
     set(IS_NVIDIA_CUDA ON)
     include(cmake/source_nvidia.cmake)

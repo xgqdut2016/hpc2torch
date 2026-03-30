@@ -19,8 +19,28 @@ message(STATUS "✅ 自动找到 PyTorch 路径: ${TORCH_DIR}")
 message(STATUS "✅ PyTorch 头文件: ${TORCH_INCLUDE}")
 message(STATUS "✅ PyTorch 库路径: ${TORCH_LIB}")
 
+# ------------------------
+# 额外添加 dlpack 头文件路径
+# ------------------------
+execute_process(
+    COMMAND python -c "import tvm_ffi, os; print(os.path.join(os.path.dirname(tvm_ffi.__file__), 'include'))"
+    OUTPUT_VARIABLE DLPACK_INCLUDE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+message(STATUS "✅ DLPack include: ${DLPACK_INCLUDE}")
+include_directories(${DLPACK_INCLUDE})
+
 add_definitions(-DENABLE_NVIDIA_API -DUSE_CUDA=1)
 enable_language(CUDA)
+
+
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
+
+# ------------------------
+# 注入 SGL_CUDA_ARCH 宏（关键）
+# ------------------------
+add_definitions(-DSGL_CUDA_ARCH=${SGL_CUDA_ARCH})
 
 # CUTLASS
 if(DEFINED ENV{CUTLASS_ROOT})
@@ -51,7 +71,6 @@ set(PROJECT_CUDA_SOURCES
 find_package(CUDA REQUIRED)
 include_directories(${CUDA_INCLUDE_DIRS})
 
-set(CUDA_ARCH 80)
 
 set_source_files_properties(${NVIDIA_CUDA_SRC}
     PROPERTIES
