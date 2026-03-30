@@ -1,3 +1,4 @@
+#if defined(ENABLE_NVIDIA_API)
 #include "../sgl_kernel/tensor.h"
 
 #include "../sgl_kernel/scalar_type.hpp"
@@ -1237,3 +1238,4 @@ extern "C" void w4a16_nv(void *c,
         break;
     }
 }
+#endif
