@@ -444,14 +444,14 @@ def test(
     if size_k % group_size != 0:
         return
     
-    dataType = 0
+    dataType = 1
     if (dataType == 0):
         test_dtype = torch.float16
     elif (dataType == 1):
         test_dtype = torch.bfloat16
     
     print(
-        f"Testing w4a16 on {device} with M-K-N:({size_m, size_k, size_n}), group_size:{group_size}, test_dtype:{test_dtype}"
+        f"Testing gptq_marlin_gemm on {device} with M-K-N:({size_m, size_k, size_n}), group_size:{group_size}, test_dtype:{test_dtype}"
     )
     a_input = torch.randn((size_m, size_k), dtype=test_dtype, device=device)
     b_weight = torch.randn((size_k, size_n), dtype=test_dtype, device=device)
@@ -495,8 +495,8 @@ def test(
     # global_scale_size = marlin_s2.size(0)
         
     if device == "cuda":
-        torch_w4a16_linear_time = performance.CudaProfile((torch.matmul, (a_input, w_ref))) 
-        lib.w4a16_nv.argtypes = [
+        torch_gptq_marlin_gemm_linear_time = performance.CudaProfile((torch.matmul, (a_input, w_ref))) 
+        lib.gptq_marlin_gemm_nv.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(ctypes.c_void_p),
@@ -519,8 +519,8 @@ def test(
             ctypes.c_int
         ]
         
-        custom_w4a16_linear_time = \
-        performance.CudaProfile((lib.w4a16_nv, (
+        custom_gptq_marlin_gemm_linear_time = \
+        performance.CudaProfile((lib.gptq_marlin_gemm_nv, (
                       C_ptr, A_ptr, B_ptr, b_scales_ptr, global_scale_ptr, b_zeros_ptr, g_idx_ptr, perm_ptr,
                       quant_type.id, 
                       is_k_full, use_atomic_add, use_fp32_reduce, is_zp_float, 
@@ -529,7 +529,7 @@ def test(
                       num_groups, 
                       dataType)))
         
-    performance.logBenchmark(torch_w4a16_linear_time, custom_w4a16_linear_time)
+    performance.logBenchmark(torch_gptq_marlin_gemm_linear_time, custom_gptq_marlin_gemm_linear_time)
 
     max_diff = torch.mean(torch.abs(C - output_ref)) / torch.mean(
         torch.abs(output_ref)
@@ -545,7 +545,7 @@ def test(
     print("absolute error:%.4e"%(atol))
     print("relative error:%.4e"%(rtol))
 
-parser = argparse.ArgumentParser(description="Test w4a16 on different devices.")
+parser = argparse.ArgumentParser(description="Test gptq_marlin_gemm on different devices.")
 parser.add_argument('--device', choices=['cpu', 'cuda', 'mlu', 'npu'], required=True, help="Device to run the tests on.")
 args = parser.parse_args()    
 
