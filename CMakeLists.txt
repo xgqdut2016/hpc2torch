@@ -5,7 +5,7 @@ project(MyCUDAProject)
 # Options
 # ========================
 option(USE_CUDA "Enable CUDA" OFF)
-option(USE_DL "Enable DL" OFF)
+option(USE_QL "Enable QL" OFF)
 option(USE_BANG "Enable BANG / Cambricon" OFF)
 option(USE_KUNLUN "Enable Kunlun / XPU" OFF)
 option(USE_ASCEND "Enable ascend" OFF)
@@ -21,14 +21,14 @@ set(ALL_SOURCES ${PROJECT_CPU_SOURCES})
 set(ALL_LINK_LIBS "")
 
 set(IS_NVIDIA_CUDA OFF)
-set(IS_DLCC_CUDA OFF)
+set(IS_QLCC_CUDA OFF)
 set(IS_BANG OFF)
 set(IS_KUNLUN OFF)
 set(IS_ASCEND OFF)
 set(IS_TECO OFF)
 
 # ========================
-# CUDA / DLCC / NVIDIA
+# CUDA / QLCC / NVIDIA
 # ========================
 # ------------------------
 # 支持用户传入 --cuda_arch=sm_90a
@@ -64,9 +64,9 @@ if(USE_CUDA)
     list(APPEND ALL_LINK_LIBS ${NVIDIA_LINK_LIBS})
 endif()
 
-if(USE_DL)
-    # ---------- DLCC ----------
-    set(IS_DLCC_CUDA ON)
+if(USE_QL)
+    # ---------- QLCC ----------
+    set(IS_QLCC_CUDA ON)
     include(cmake/source_ql.cmake)
     list(APPEND ALL_SOURCES ${PROJECT_QL_CPP_SOURCES})
     list(APPEND ALL_LINK_LIBS ${QL_LINK_LIBS})
@@ -165,7 +165,7 @@ elseif(IS_TECO)
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     )
 else()
-    # NVIDIA / DLCC / CPU 平台
+    # NVIDIA / QLCC / CPU 平台
     add_library(my_library SHARED ${ALL_SOURCES})
     set_target_properties(my_library PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
@@ -188,12 +188,12 @@ if(IS_NVIDIA_CUDA)
 endif()
 
 # ========================
-# DLCC CUDA fixes
+# QLCC CUDA fixes
 # ========================
-if(IS_DLCC_CUDA)
+if(IS_QLCC_CUDA)
     # 添加 include path
-    include_directories(${DLCC_CUDA_PATH}/include)
-    target_include_directories(my_library PRIVATE ${DLCC_CUDA_PATH}/include)
+    include_directories(${QLCC_CUDA_PATH}/include)
+    target_include_directories(my_library PRIVATE ${QLCC_CUDA_PATH}/include)
 
     if(DEFINED CUTLASS_INCLUDE)
         include_directories(${CUTLASS_INCLUDE})

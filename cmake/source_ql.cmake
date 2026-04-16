@@ -2,7 +2,7 @@
 # source_ql.cmake （已自动集成 PyTorch 依赖）
 # ========================
 
-message(STATUS "Configuring DLCC (QL) CUDA backend")
+message(STATUS "Configuring QLCC (QL) CUDA backend")
 
 # ------------------------
 # 1. 自动获取 PyTorch 路径（关键！不写死路径）
@@ -25,11 +25,11 @@ message(STATUS "✅ PyTorch 库路径: ${TORCH_LIB}")
 add_compile_definitions(USE_CUDA=1 ENABLE_QL_API)
 
 # ------------------------
-# DLCC 路径 / 架构
+# QLCC 路径 / 架构
 # ------------------------
-set(DLCC_PATH /usr/local/denglin/sdk/bin/dlcc)
-set(DLCC_CUDA_PATH /usr/local/denglin/sdk)
-set(DLCC_ARCH dlgput64)
+set(QLCC_PATH /usr/local/denglin/sdk/bin/dlcc)
+set(QLCC_CUDA_PATH /usr/local/denglin/sdk)
+set(QLCC_ARCH dlgput64)
 
 # CUTLASS
 if(DEFINED ENV{CUTLASS_ROOT})
@@ -67,21 +67,21 @@ foreach(cu ${QL_CUDA_SRC})
     add_custom_command(
         OUTPUT ${obj}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${obj_dir}
-        COMMAND ${DLCC_PATH}
+        COMMAND ${QLCC_PATH}
             -c -x cuda ${cu} -o ${obj}
             -DENABLE_QL_API
-            --cuda-path=${DLCC_CUDA_PATH}
-            --cuda-gpu-arch=${DLCC_ARCH}
-            --offload-arch=${DLCC_ARCH},dlgpux64
+            --cuda-path=${QLCC_CUDA_PATH}
+            --cuda-gpu-arch=${QLCC_ARCH}
+            --offload-arch=${QLCC_ARCH},dlgpux64
             -I${PROJECT_SOURCE_DIR}/include
             -I${CUTLASS_INCLUDE}
-            -I${DLCC_CUDA_PATH}/include
+            -I${QLCC_CUDA_PATH}/include
             -I${TORCH_INCLUDE}          # ✅ 自动加 PyTorch 头文件
             -I${TORCH_INCLUDE}/torch/csrc/api/include  # ✅ 关键头文件
             -O2 -std=c++17 -fPIC
             -mllvm -dlgpu-lower-xtpvn=true
         DEPENDS ${cu}
-        COMMENT "DLCC compiling ${cu}"
+        COMMENT "QLCC compiling ${cu}"
         VERBATIM
     )
 
@@ -95,9 +95,9 @@ add_custom_target(ql_cuda_objs ALL DEPENDS ${QL_CU_OBJECTS})
 # 链接库（已自动加入 PyTorch 所有依赖库）
 # ------------------------
 set(QL_LINK_LIBS
-    ${DLCC_CUDA_PATH}/lib/libcurt.so
-    ${DLCC_CUDA_PATH}/lib/libcublas.so
-    ${DLCC_CUDA_PATH}/lib/libcudnn.so
+    ${QLCC_CUDA_PATH}/lib/libcurt.so
+    ${QLCC_CUDA_PATH}/lib/libcublas.so
+    ${QLCC_CUDA_PATH}/lib/libcudnn.so
 
     # ✅ 自动链接 PyTorch 库（解决你所有 undefined symbol 问题！）
     ${TORCH_LIB}/libtorch.so

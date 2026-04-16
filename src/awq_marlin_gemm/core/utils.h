@@ -47,10 +47,10 @@
 
 #include <dlpack/dlpack.h>
 #include <type_traits>
-#include <concepts>
+// #include <concepts>
 #include <cstddef>
 #include <ostream>
-#include <ranges>
+// #include <ranges>
 #include <sstream>
 #include <utility>
 
@@ -239,4 +239,3 @@ namespace host
   // ====================== 修复结束 ======================
 
 } // namespace host
-
