@@ -35,7 +35,7 @@ add_definitions(-DENABLE_NVIDIA_API -DUSE_CUDA=1)
 enable_language(CUDA)
 
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr --threads 8")
 
 # ------------------------
 # 注入 SGL_CUDA_ARCH 宏（关键）
@@ -93,7 +93,5 @@ set(NVIDIA_LINK_LIBS
     ${TORCH_LIB}/libc10_cuda.so
     ${TORCH_LIB}/libtorch_python.so
 )
-
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
 
 message(STATUS "✅ NVIDIA 后端：已集成 PyTorch 依赖")

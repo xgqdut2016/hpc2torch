@@ -178,7 +178,7 @@ endif()
 if(IS_NVIDIA_CUDA)
     # 明确 CUDA 架构
     set_target_properties(my_library PROPERTIES
-        CUDA_ARCHITECTURES 80
+        CUDA_ARCHITECTURES ${CUDA_ARCH}
     )
 
     # CUTLASS 必需 flag
