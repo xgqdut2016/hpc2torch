@@ -1,4 +1,4 @@
-#if defined(ENABLE_NVIDIA_API)
+#if defined(ENABLE_NVIDIA_API) && (ENABLE_TVM_API)
 #include "../sgl_kernel/tensor.h"
 
 #include "../sgl_kernel/scalar_type.hpp"

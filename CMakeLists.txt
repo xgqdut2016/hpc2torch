@@ -51,11 +51,7 @@ else()
     set(CUDA_ARCH 80)
 endif()
 
-# 计算 SGL_CUDA_ARCH = major*100 + minor*10
-math(EXPR SGL_CUDA_ARCH "${CUDA_ARCH} * 10")
-
 message(STATUS "✅ CUDA_ARCH = ${CUDA_ARCH}")
-message(STATUS "✅ SGL_CUDA_ARCH = ${SGL_CUDA_ARCH}")
 
 if(USE_CUDA)
     set(IS_NVIDIA_CUDA ON)

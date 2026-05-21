@@ -45,7 +45,7 @@
 #include "source_location.h"
 #endif
 
-#include <dlpack/dlpack.h>
+#include "dlpack/dlpack.h"
 #include <type_traits>
 // #include <concepts>
 #include <cstddef>
