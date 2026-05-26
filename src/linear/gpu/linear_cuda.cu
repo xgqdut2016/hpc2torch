@@ -84,7 +84,7 @@ __device__ void postSymKernel(Tdata *y, int32_t *y_packed, const Tdata *c, const
     y[idx] = static_cast<Tdata>(output);
 }
 
-#if defined ENABLE_NVIDIA_API
+#if defined(ENABLE_NVIDIA_API) && (ENABLE_CUTLASS_API)
 #include "cutlass/cutlass.h"
 #include "cutlass/epilogue/thread/linear_combination.h"
 #include "cutlass/gemm/device/gemm.h"
@@ -185,7 +185,7 @@ void launchKernel(void *y,
     int32_t *y_packed;
     cudaMalloc((void **)&y_packed, M * N * sizeof(int32_t));
 
-#if defined ENABLE_NVIDIA_API
+#if defined(ENABLE_NVIDIA_API) && (ENABLE_CUTLASS_API)
     int8Gemm((int8_t *)x_packed, (int8_t *)w_packed, y_packed, M, N, K, stream);
 #elif defined ENABLE_QL_API
     const int32_t alpha_I = 1;

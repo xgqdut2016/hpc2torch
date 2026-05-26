@@ -20,7 +20,7 @@ message(STATUS "✅ PyTorch 头文件: ${TORCH_INCLUDE}")
 message(STATUS "✅ PyTorch 库路径: ${TORCH_LIB}")
 
 # ------------------------
-# 从环境变量获取 TVM 路径（对齐 xmake.lua 逻辑：TVM_ROOT / TVM_HOME / TVM_PATH）
+# 从环境变量获取 TVM 路径（TVM_ROOT / TVM_HOME / TVM_PATH）
 # ------------------------
 set(TVM_ROOT "$ENV{TVM_ROOT}")
 if(NOT TVM_ROOT)
@@ -60,15 +60,36 @@ enable_language(CUDA)
 
 
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr --threads 8")
+set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+set(CMAKE_CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
+message(STATUS "✅ CUDA编译模式: 独立编译(CMAKE_CUDA_SEPARABLE_COMPILATION=ON)")
 # ------------------------
 # 注入 SGL_CUDA_ARCH 宏（关键）
 # ------------------------
 add_definitions(-DSGL_CUDA_ARCH=${SGL_CUDA_ARCH})
 
-# CUTLASS
-if(DEFINED ENV{CUTLASS_ROOT})
-    include_directories($ENV{CUTLASS_ROOT})
+set(CUTLASS_ROOT "$ENV{CUTLASS_ROOT}")
+if(NOT CUTLASS_ROOT)
+    set(CUTLASS_ROOT "$ENV{CUTLASS_HOME}")
+endif()
+if(NOT CUTLASS_ROOT)
+    set(CUTLASS_ROOT "$ENV{CUTLASS_PATH}")
+endif()
+
+if(CUTLASS_ROOT)
+    message(STATUS "✅ 找到 CUTLASS 根目录: ${CUTLASS_ROOT}")
+    
+    add_definitions(-DENABLE_CUTLASS_API)
+    
+    include_directories(${CUTLASS_ROOT})
+    include_directories(${CUTLASS_ROOT}/include)
+    include_directories(${CUTLASS_ROOT}/tools/util/include)
+    
+    message(STATUS "✅ 已添加 cutlass 头文件路径")
+    message(STATUS "✅ 已启用宏: ENABLE_cutlass_API")
+else()
+    message(STATUS "ℹ️ 未设置 CUTLASS_ROOT / CUTLASS_HOME / CUTLASS_PATH，不启用 CUTLASS 相关功能")
 endif()
 
 # ------------------------
@@ -76,6 +97,36 @@ endif()
 # ------------------------
 include_directories(${TORCH_INCLUDE})
 include_directories(${TORCH_INCLUDE}/torch/csrc/api/include)
+
+# ========================
+# 自动生成 AWQ Marlin Kernels
+# ========================
+set(GENERATE_SCRIPT ${PROJECT_SOURCE_DIR}/src/awq_marlin_gemm/gpu/generate_kernels.py)
+set(GENERATED_HEADER ${PROJECT_SOURCE_DIR}/src/awq_marlin_gemm/gpu/kernel_selector.h)
+
+# 如果头文件已存在，则跳过生成
+if(EXISTS ${GENERATED_HEADER})
+    message(STATUS "✅ AWQ Marlin 内核已生成，跳过重复生成 (${GENERATED_HEADER})")
+else()
+    set(GENERATE_ARCH "${CUDA_ARCH}.0")
+    message(STATUS "🔧 首次生成 AWQ Marlin 内核 (架构: ${GENERATE_ARCH})")
+    
+    execute_process(
+        COMMAND python ${GENERATE_SCRIPT} ${GENERATE_ARCH}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        RESULT_VARIABLE GEN_KERNEL_RESULT
+        OUTPUT_VARIABLE GEN_KERNEL_OUTPUT
+        ERROR_VARIABLE GEN_KERNEL_ERROR
+    )
+    
+    if(NOT GEN_KERNEL_RESULT EQUAL 0)
+        message(FATAL_ERROR "❌ 生成 AWQ Marlin 内核失败！\n错误信息: ${GEN_KERNEL_ERROR}")
+    endif()
+    
+    message(STATUS "✅ 首次生成 AWQ Marlin 内核完成！")
+endif()
+
+
 
 # CUDA 源文件
 file(GLOB_RECURSE NVIDIA_CUDA_SRC
@@ -120,34 +171,3 @@ set(NVIDIA_LINK_LIBS
 
 message(STATUS "✅ NVIDIA 后端：已集成 PyTorch 依赖")
 
-# ========================
-# 自动生成 AWQ Marlin Kernels (仅首次生成，已存在则跳过)
-# ========================
-set(GENERATE_SCRIPT ${PROJECT_SOURCE_DIR}/src/awq_marlin_gemm/gpu/generate_kernels.py)
-set(GENERATED_HEADER ${PROJECT_SOURCE_DIR}/src/awq_marlin_gemm/gpu/kernel_selector.h)
-
-# 如果头文件已存在，则跳过生成
-if(EXISTS ${GENERATED_HEADER})
-    message(STATUS "✅ AWQ Marlin 内核已生成，跳过重复生成 (${GENERATED_HEADER})")
-else()
-    # 将数字架构转为浮点数 80 -> 8.0, 90 ->9.0
-    set(GENERATE_ARCH "${CUDA_ARCH}.0")
-    
-    message(STATUS "🔧 首次生成 AWQ Marlin 内核 (架构: ${GENERATE_ARCH})")
-    
-    # 执行 Python 生成内核头文件
-    execute_process(
-        COMMAND python ${GENERATE_SCRIPT} ${GENERATE_ARCH}
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        RESULT_VARIABLE GEN_KERNEL_RESULT
-        OUTPUT_VARIABLE GEN_KERNEL_OUTPUT
-        ERROR_VARIABLE GEN_KERNEL_ERROR
-    )
-    
-    # 检查是否生成成功
-    if(NOT GEN_KERNEL_RESULT EQUAL 0)
-        message(FATAL_ERROR "❌ 生成 AWQ Marlin 内核失败！\n错误信息: ${GEN_KERNEL_ERROR}")
-    endif()
-    
-    message(STATUS "✅ 首次生成 AWQ Marlin 内核完成！")
-endif()

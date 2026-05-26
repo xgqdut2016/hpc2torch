@@ -1,5 +1,5 @@
 #include <cub/block/block_reduce.cuh>
-
+#include "gpu/common_gpu.h"
 template <typename T, unsigned int BLOCK_SIZE>
 __device__ void blockLPNormKernel(
     T const *input, T *output, float p, int dimsize,
@@ -113,34 +113,6 @@ __device__ void blockLPNormStridesKernel(
                 input[ind_i + ind]) *
             inv);
     }
-}
-
-template <typename T>
-struct SumOp
-{
-    __device__ __forceinline__ T operator()(const T &a, const T &b) const
-    {
-        return a + b;
-    }
-};
-
-template <typename T>
-struct MaxOp
-{
-    __device__ __forceinline__ T operator()(const T &a, const T &b) const
-    {
-        return max(a, b);
-    }
-};
-template <template <typename> class ReductionOp, typename T,
-          int thread_group_width>
-__inline__ __device__ T WarpAllReduce(T val)
-{
-    for (int mask = thread_group_width / 2; mask > 0; mask /= 2)
-    {
-        val = ReductionOp<T>()(val, __shfl_xor_sync(0xffffffff, val, mask));
-    }
-    return val;
 }
 
 template <typename T, unsigned int BLOCK_SIZE_x, unsigned int BLOCK_SIZE_y>

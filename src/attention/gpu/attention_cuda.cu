@@ -1,6 +1,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h> // 确保包含这个头文件
 #include <math.h>
+#include "gpu/common_gpu.h"
 #define cudaCheckError(ans)                   \
     {                                         \
         gpuAssert((ans), __FILE__, __LINE__); \
@@ -188,34 +189,6 @@ __device__ void matmulSV(float *shareQK, const float *__restrict inputV,
         }
         __syncthreads();
     }
-}
-template <typename T>
-struct SumOp
-{
-    __device__ __forceinline__ T operator()(const T &a, const T &b) const
-    {
-        return a + b;
-    }
-};
-
-template <typename T>
-struct MaxOp
-{
-    __device__ __forceinline__ T operator()(const T &a, const T &b) const
-    {
-        return max(a, b);
-    }
-};
-template <template <typename> class ReductionOp, typename T,
-          int thread_group_width = 32>
-__inline__ __device__ T WarpAllReduce(T val)
-{
-    for (int mask = thread_group_width / 2; mask > 0; mask >>= 1)
-    {
-        val = ReductionOp<T>()(val, __shfl_xor_sync(0xffffffff, val, mask));
-    }
-
-    return val;
 }
 
 template <int Br, int Bc, int Rq, int Rv>

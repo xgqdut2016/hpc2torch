@@ -22,17 +22,23 @@ python test/test_softmax.py --device cpu
 
 ## 英伟达平台
 ### cutlass准备
-编译cutlass相关代码需要选择合适的sm，另外对于cutlass仓库，需要把tools/util/include/cutlass/util目录移动到include/cutlass/下面
+编译cutlass相关代码需要选择合适的sm，另外对于cutlass仓库，搜索头文件路径包括cutlass/,cutlass/include/,cutlass/tools/util/include/，并且需要设置CUTLASS_ROOT
+```shell
+git clone https://github.com/NVIDIA/cutlass.git --recursive
+export CUTLASS_ROOT=<path>/cutlass
+```
 
 ### awq_marlin_gemm和gptq_marlin_gemm注意事项
 测试awq_marlin_gemm算子注意：需要进入hpc2torch/src/awq_marlin_gemm/gpu里面，使用
 ```shell
 python generate_kernels.py 8.0
 ```
-生成对应架构上（比如我这里是CUDA_ARCH=80）的sm80_kernel_*.cu以及一个kernel_selector.h，否则就算编译通过，测试也会报错，这里本人在source_nvidia.cmake里面做了自动处理，编译过程可以自动生成这些文件
+生成对应架构上（比如我这里是CUDA_ARCH=80）的sm80_kernel_*.cu以及一个kernel_selector.h，否则就算编译通过，测试也会报错
 ```shell
 undefined symbol: _ZN6marlin6MarlinILl1125899906910725ELl1125899923621888ELl1125899906910725ELl1125899906910725ELi256ELi2ELi16ELi4ELb0ELi4ELi8ELb0EEEvPK4int4S3_PS1_S4_S3_PKfS3_S6_S3_PKiiiiiiPibbbi
 ```
+这里本人在source_nvidia.cmake里面做了自动处理，编译过程可以自动生成并且编译这些文件
+
 另外编译gptq_marlin_gemm算子过程中需要使用tvm，使用
 
 ```shell

@@ -1,4 +1,5 @@
 #include <cub/block/block_reduce.cuh>
+#include "gpu/common_gpu.h"
 
 __device__ inline int round_half_away_from_zero(float x)
 {
@@ -22,7 +23,7 @@ __device__ void blockPerChannelQuantI8Kernel(
     {
         thread_max = fmaxf(thread_max, (float)x[tid + ind]);
     }
-    float local_max = BlockReduce(temp_storage).Reduce(thread_max, cub::Max());
+    float local_max = BlockReduce(temp_storage).Reduce(thread_max, MaxOp<float>());
 
     __shared__ float global_max_f;
     if (threadIdx.x == 0)
@@ -37,7 +38,7 @@ __device__ void blockPerChannelQuantI8Kernel(
     {
         thread_min = fminf(thread_min, (float)x[tid + ind]);
     }
-    float local_min = BlockReduce(temp_storage).Reduce(thread_min, cub::Min());
+    float local_min = BlockReduce(temp_storage).Reduce(thread_min, MinOp<float>());
 
     __shared__ float global_min_f;
     if (threadIdx.x == 0)
@@ -102,7 +103,7 @@ __device__ void blockPerChannelQuantI8SymKernel(
     {
         thread_max = fmaxf(thread_max, fabs((float)x[tid + ind]));
     }
-    float local_max = BlockReduce(temp_storage).Reduce(thread_max, cub::Max());
+    float local_max = BlockReduce(temp_storage).Reduce(thread_max, MaxOp<float>());
 
     __shared__ float global_max_f;
     if (threadIdx.x == 0)
@@ -144,32 +145,6 @@ __device__ void blockPerChannelQuantI8SymKernel(
     }
 }
 
-template <typename T>
-struct MaxOp
-{
-    __device__ __forceinline__ T operator()(const T &a, const T &b) const
-    {
-        return max(a, b);
-    }
-};
-template <typename T>
-struct MinOp
-{
-    __device__ __forceinline__ T operator()(const T &a, const T &b) const
-    {
-        return min(a, b);
-    }
-};
-template <template <typename> class ReductionOp, typename T,
-          int thread_group_width>
-__inline__ __device__ T WarpAllReduce(T val)
-{
-    for (int mask = thread_group_width / 2; mask > 0; mask /= 2)
-    {
-        val = ReductionOp<T>()(val, __shfl_xor_sync(0xffffffff, val, mask));
-    }
-    return val;
-}
 /**
  * Performs per-channel asymmetric quantization to int8 for large matrices (K < 1024).
  * Computes scale/zero point per channel (column) and packs quantized data.

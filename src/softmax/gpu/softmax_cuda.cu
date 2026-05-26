@@ -1,4 +1,5 @@
 #include <cub/block/block_reduce.cuh>
+#include "gpu/common_gpu.h"
 
 struct __align__(8) DataMaxSum
 {                  // update the global max and sum, store the
@@ -190,34 +191,6 @@ _blockSoftmaxKernel(T const *input, T *output,
                                                 __fdividef(1.0F, dms_total.sum_tmp));
         }
     }
-}
-
-template <typename T>
-struct SumOp
-{
-    __device__ __forceinline__ T operator()(const T &a, const T &b) const
-    {
-        return a + b;
-    }
-};
-
-template <typename T>
-struct MaxOp
-{
-    __device__ __forceinline__ T operator()(const T &a, const T &b) const
-    {
-        return max(a, b);
-    }
-};
-template <template <typename> class ReductionOp, typename T,
-          int thread_group_width>
-__inline__ __device__ T WarpAllReduce(T val)
-{
-    for (int mask = thread_group_width / 2; mask > 0; mask /= 2)
-    {
-        val = ReductionOp<T>()(val, __shfl_xor_sync(0xffffffff, val, mask));
-    }
-    return val;
 }
 
 template <typename T, int BLOCK_DIM_x, int BLOCK_DIM_y, int numPerThreadx>

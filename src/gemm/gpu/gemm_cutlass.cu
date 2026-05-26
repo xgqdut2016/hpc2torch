@@ -1,3 +1,4 @@
+#if defined ENABLE_CUTLASS_API
 #include "cutlass/cutlass.h"
 #include "cutlass/epilogue/thread/linear_combination.h"
 #include "cutlass/gemm/device/gemm.h"
@@ -247,3 +248,4 @@ extern "C" void gemm_cutlass(
         break;
     }
 }
+#endif

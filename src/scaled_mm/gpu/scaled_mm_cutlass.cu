@@ -2,9 +2,10 @@
 #include <string>
 #include <cublas_v2.h>
 #include "per_channel_dequant_int8.cuh"
-#if defined ENABLE_NVIDIA_API
+#if defined(ENABLE_NVIDIA_API) && defined(ENABLE_CUTLASS_API)
 #include "int8_gemm_kernel.cuh"
-
+#endif
+#if defined ENABLE_NVIDIA_API
 inline int getSMVersion()
 {
     int device{-1};
@@ -35,7 +36,7 @@ void int8calculate(
         printf("cudaStreamCreate failed: %s\n", cudaGetErrorString(err));
         return;
     }
-#if defined ENABLE_NVIDIA_API
+#if defined(ENABLE_NVIDIA_API) && defined(ENABLE_CUTLASS_API)
     auto sm_version = getSMVersion();
     if (sm_version >= 75 && sm_version < 80)
     {

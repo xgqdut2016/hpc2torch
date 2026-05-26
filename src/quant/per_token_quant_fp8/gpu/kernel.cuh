@@ -7,26 +7,7 @@
 #include <cuda_fp8.h>
 #include <cuda.h>
 #include <cub/block/block_reduce.cuh>
-
-template <typename T>
-struct MaxOp
-{
-    __device__ __forceinline__ T operator()(const T &a, const T &b) const
-    {
-        return max(a, b);
-    }
-};
-
-template <template <typename> class ReductionOp, typename T,
-          int thread_group_width>
-__inline__ __device__ T WarpAllReduce(T val)
-{
-    for (int mask = thread_group_width / 2; mask > 0; mask /= 2)
-    {
-        val = ReductionOp<T>()(val, __shfl_xor_sync(0xffffffff, val, mask));
-    }
-    return val;
-}
+#include "gpu/common_gpu.h"
 
 static constexpr int kWarpSize = 32;
 

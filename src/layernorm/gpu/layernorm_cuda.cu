@@ -1,5 +1,6 @@
 #include <cuda.h>
 #include <cub/cub.cuh>
+#include "gpu/common_gpu.h"
 template <typename T, int BLOCK_DIM>
 __launch_bounds__(BLOCK_DIM)
     __global__ void blockLayernormKernel(T const *input, T const *scale, T const *bias, T *output, float eps, int behindsize)
@@ -17,7 +18,7 @@ __launch_bounds__(BLOCK_DIM)
     typedef cub::BlockReduce<float, BLOCK_DIM> BlockReduce;
     __shared__ typename BlockReduce::TempStorage temp_storage;
     __shared__ float mu;
-    float muBlock = BlockReduce(temp_storage).Reduce(muPartial, cub::Sum());
+    float muBlock = BlockReduce(temp_storage).Reduce(muPartial, SumOp<float>());
     if (threadIdx.x == 0)
     {
         mu = muBlock * __fdividef(1.0F, behindsize);
@@ -29,7 +30,7 @@ __launch_bounds__(BLOCK_DIM)
         sigma2Partial += (static_cast<float>(input[tid + id]) - mu) * (static_cast<float>(input[tid + id]) - mu);
     }
     __shared__ float sigma2;
-    float sigma2Block = BlockReduce(temp_storage).Reduce(sigma2Partial, cub::Sum());
+    float sigma2Block = BlockReduce(temp_storage).Reduce(sigma2Partial, SumOp<float>());
     if (threadIdx.x == 0)
     {
         float sigmaTmp = sqrt(sigma2Block * __fdividef(1.0F, behindsize) + eps);
@@ -41,25 +42,7 @@ __launch_bounds__(BLOCK_DIM)
         output[tid + id] = static_cast<T>(static_cast<float>(scale[id]) * (static_cast<float>(input[tid + id]) - mu) * sigma2 + static_cast<float>(bias[id]));
     }
 }
-template <typename T>
-struct SumOp
-{
-    __device__ __forceinline__ T operator()(const T &a, const T &b) const
-    {
-        return a + b;
-    }
-};
 
-template <template <typename> class ReductionOp, typename T,
-          int thread_group_width>
-__inline__ __device__ T WarpAllReduce(T val)
-{
-    for (int mask = thread_group_width / 2; mask > 0; mask /= 2)
-    {
-        val = ReductionOp<T>()(val, __shfl_xor_sync(0xffffffff, val, mask));
-    }
-    return val;
-}
 template <typename T, int BLOCK_DIM_x, int BLOCK_DIM_y>
 __global__ void warpLayernormKernel(T const *input, T const *scale, T const *bias, T *output, float eps, int behindsize)
 {
