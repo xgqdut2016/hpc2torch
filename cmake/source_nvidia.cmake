@@ -87,7 +87,7 @@ if(CUTLASS_ROOT)
     include_directories(${CUTLASS_ROOT}/tools/util/include)
     
     message(STATUS "✅ 已添加 cutlass 头文件路径")
-    message(STATUS "✅ 已启用宏: ENABLE_cutlass_API")
+    message(STATUS "✅ 已启用宏: ENABLE_CUTLASS_API")
 else()
     message(STATUS "ℹ️ 未设置 CUTLASS_ROOT / CUTLASS_HOME / CUTLASS_PATH，不启用 CUTLASS 相关功能")
 endif()

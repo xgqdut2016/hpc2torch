@@ -191,11 +191,6 @@ if(IS_QLCC_CUDA)
     include_directories(${QLCC_CUDA_PATH}/include)
     target_include_directories(my_library PRIVATE ${QLCC_CUDA_PATH}/include)
 
-    if(DEFINED CUTLASS_INCLUDE)
-        include_directories(${CUTLASS_INCLUDE})
-        target_include_directories(my_library PRIVATE ${CUTLASS_INCLUDE})
-    endif()
-
     if(TARGET ql_cuda_objs)
         add_dependencies(my_library ql_cuda_objs)
         target_sources(my_library PRIVATE ${QL_CU_OBJECTS})

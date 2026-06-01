@@ -15,7 +15,7 @@ limitations under the License.
 
 #include <cuda.h>
 #include <cuda_fp8.h>
-#ifdef ENABLE_CUTLASS_API
+#if defined(ENABLE_NVIDIA_API) && defined(ENABLE_CUTLASS_API)
 #include <cutlass/arch/config.h>
 #endif
 

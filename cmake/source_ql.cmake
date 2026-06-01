@@ -31,11 +31,20 @@ set(QLCC_PATH /usr/local/denglin/sdk/bin/dlcc)
 set(QLCC_CUDA_PATH /usr/local/denglin/sdk)
 set(QLCC_ARCH dlgput64)
 
-# CUTLASS
-if(DEFINED ENV{CUTLASS_ROOT})
-    set(CUTLASS_INCLUDE $ENV{CUTLASS_ROOT})
+set(CUTLASS_ROOT "$ENV{CUTLASS_ROOT}")
+if(NOT CUTLASS_ROOT)
+    set(CUTLASS_ROOT "$ENV{CUTLASS_HOME}")
+endif()
+if(NOT CUTLASS_ROOT)
+    set(CUTLASS_ROOT "$ENV{CUTLASS_PATH}")
 endif()
 
+
+set(QL_COMPILE_DEFINES "-DENABLE_QL_API")
+
+if(CUTLASS_ROOT)
+    set(QL_COMPILE_DEFINES "${QL_COMPILE_DEFINES} -DENABLE_CUTLASS_API")
+endif()
 # ------------------------
 # 源文件
 # ------------------------
@@ -69,12 +78,12 @@ foreach(cu ${QL_CUDA_SRC})
         COMMAND ${CMAKE_COMMAND} -E make_directory ${obj_dir}
         COMMAND ${QLCC_PATH}
             -c -x cuda ${cu} -o ${obj}
-            -DENABLE_QL_API
+            ${QL_COMPILE_DEFINES}
             --cuda-path=${QLCC_CUDA_PATH}
             --cuda-gpu-arch=${QLCC_ARCH}
             --offload-arch=${QLCC_ARCH},dlgpux64
             -I${PROJECT_SOURCE_DIR}/include
-            -I${CUTLASS_INCLUDE}
+            -I${CUTLASS_ROOT} -I${CUTLASS_ROOT}/include -I${CUTLASS_ROOT}/tools/util/include
             -I${QLCC_CUDA_PATH}/include
             -I${TORCH_INCLUDE}          # ✅ 自动加 PyTorch 头文件
             -I${TORCH_INCLUDE}/torch/csrc/api/include  # ✅ 关键头文件
