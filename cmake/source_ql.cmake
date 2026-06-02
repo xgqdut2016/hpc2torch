@@ -27,8 +27,10 @@ add_compile_definitions(USE_CUDA=1 ENABLE_QL_API)
 # ------------------------
 # QLCC 路径 / 架构
 # ------------------------
-set(QLCC_PATH /usr/local/denglin/sdk/bin/dlcc)
-set(QLCC_CUDA_PATH /usr/local/denglin/sdk)
+set(QL_ROOT $ENV{QL_ROOT})
+
+set(QLCC_PATH ${QL_ROOT}/sdk/bin/dlcc)
+set(QLCC_CUDA_PATH ${QL_ROOT}/sdk)
 set(QLCC_ARCH dlgput64)
 
 set(CUTLASS_ROOT "$ENV{CUTLASS_ROOT}")
