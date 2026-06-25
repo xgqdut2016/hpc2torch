@@ -98,35 +98,52 @@ endif()
 include_directories(${TORCH_INCLUDE})
 include_directories(${TORCH_INCLUDE}/torch/csrc/api/include)
 
-# ========================
-# 自动生成 AWQ Marlin Kernels
-# ========================
-set(GENERATE_SCRIPT ${PROJECT_SOURCE_DIR}/src/awq_marlin_gemm/gpu/generate_kernels.py)
-set(GENERATED_HEADER ${PROJECT_SOURCE_DIR}/src/awq_marlin_gemm/gpu/kernel_selector.h)
+function(generate_marlin_kernels OP_NAME OP_DIR)
 
-# 如果头文件已存在，则跳过生成
-if(EXISTS ${GENERATED_HEADER})
-    message(STATUS "✅ AWQ Marlin 内核已生成，跳过重复生成 (${GENERATED_HEADER})")
-else()
-    set(GENERATE_ARCH "${CUDA_ARCH}.0")
-    message(STATUS "🔧 首次生成 AWQ Marlin 内核 (架构: ${GENERATE_ARCH})")
-    
-    execute_process(
-        COMMAND python ${GENERATE_SCRIPT} ${GENERATE_ARCH}
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        RESULT_VARIABLE GEN_KERNEL_RESULT
-        OUTPUT_VARIABLE GEN_KERNEL_OUTPUT
-        ERROR_VARIABLE GEN_KERNEL_ERROR
-    )
-    
-    if(NOT GEN_KERNEL_RESULT EQUAL 0)
-        message(FATAL_ERROR "❌ 生成 AWQ Marlin 内核失败！\n错误信息: ${GEN_KERNEL_ERROR}")
+    set(GENERATE_SCRIPT
+        ${PROJECT_SOURCE_DIR}/src/${OP_DIR}/gpu/generate_kernels.py)
+
+    set(GENERATED_HEADER
+        ${PROJECT_SOURCE_DIR}/src/${OP_DIR}/gpu/kernel_selector.h)
+
+    if(EXISTS ${GENERATED_HEADER})
+        message(STATUS
+            "✅ ${OP_NAME} 内核已生成，跳过重复生成 (${GENERATED_HEADER})")
+    else()
+
+        set(GENERATE_ARCH "${CUDA_ARCH}.0")
+
+        message(STATUS
+            "🔧 首次生成 ${OP_NAME} 内核 (架构: ${GENERATE_ARCH})")
+
+        execute_process(
+            COMMAND python ${GENERATE_SCRIPT} ${GENERATE_ARCH}
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+            RESULT_VARIABLE GEN_KERNEL_RESULT
+            OUTPUT_VARIABLE GEN_KERNEL_OUTPUT
+            ERROR_VARIABLE GEN_KERNEL_ERROR
+        )
+
+        if(NOT GEN_KERNEL_RESULT EQUAL 0)
+            message(FATAL_ERROR
+                "❌ 生成 ${OP_NAME} 内核失败！\n"
+                "错误信息:\n${GEN_KERNEL_ERROR}")
+        endif()
+
+        message(STATUS "✅ 首次生成 ${OP_NAME} 内核完成！")
     endif()
-    
-    message(STATUS "✅ 首次生成 AWQ Marlin 内核完成！")
-endif()
 
+endfunction()
 
+generate_marlin_kernels(
+    "AWQ Marlin"
+    "awq_marlin_gemm"
+)
+
+generate_marlin_kernels(
+    "vllm_moe_wna16 Marlin"
+    "vllm_moe_wna16_marlin_gemm"
+)
 
 # CUDA 源文件
 file(GLOB_RECURSE NVIDIA_CUDA_SRC
